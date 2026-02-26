@@ -1,8 +1,13 @@
 from fastapi import APIRouter, HTTPException, Request, Header, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 from datetime import datetime
+import json
+import os
+import signal
 import uuid
 from typing import Optional
+
+import httpx
 
 from src.core.config import config
 from src.core.logging import logger
@@ -12,6 +17,11 @@ from src.conversion.request_converter import convert_claude_to_openai
 from src.conversion.response_converter import (
     convert_openai_to_claude_response,
     convert_openai_streaming_to_claude_with_cancellation,
+)
+from src.conversion.responses_converter import (
+    convert_responses_to_chat_completions,
+    build_response_object,
+    stream_responses_from_chat_completions,
 )
 from src.core.model_manager import model_manager
 
@@ -28,20 +38,37 @@ openai_client = OpenAIClient(
     custom_headers=custom_headers,
 )
 
-async def validate_api_key(x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
-    """Validate the client's API key from either x-api-key header or Authorization header."""
-    client_api_key = None
-    
-    # Extract API key from headers
+# Shared httpx client for pass-through requests
+_httpx_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_httpx_client() -> httpx.AsyncClient:
+    global _httpx_client
+    if _httpx_client is None:
+        _httpx_client = httpx.AsyncClient(timeout=config.request_timeout)
+    return _httpx_client
+
+
+def _extract_bearer_token(
+    x_api_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+) -> Optional[str]:
+    """Extract the API key from request headers."""
     if x_api_key:
-        client_api_key = x_api_key
-    elif authorization and authorization.startswith("Bearer "):
-        client_api_key = authorization.replace("Bearer ", "")
-    
+        return x_api_key
+    if authorization and authorization.startswith("Bearer "):
+        return authorization.replace("Bearer ", "")
+    return None
+
+
+async def validate_api_key(x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
+    """Validate the client's API key against ANTHROPIC_API_KEY (Claude Code flow)."""
+    client_api_key = _extract_bearer_token(x_api_key, authorization)
+
     # Skip validation if ANTHROPIC_API_KEY is not set in the environment
     if not config.anthropic_api_key:
         return
-        
+
     # Validate the client API key
     if not client_api_key or not config.validate_client_api_key(client_api_key):
         logger.warning(f"Invalid API key provided by client")
@@ -49,6 +76,36 @@ async def validate_api_key(x_api_key: Optional[str] = Header(None), authorizatio
             status_code=401,
             detail="Invalid API key. Please provide a valid Anthropic API key."
         )
+
+
+async def validate_openai_api_key(x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
+    """Validate the client's API key against either ANTHROPIC_API_KEY or OPENAI_API_KEY.
+
+    Used by Responses API, Chat Completions pass-through, and Models endpoints
+    where clients send the OpenAI key rather than the Anthropic key.
+
+    Allows unauthenticated requests — some clients (e.g. Codex CLI) send no
+    Authorization header at all.  Since the proxy only listens on localhost
+    inside the container, this is safe.
+    """
+    client_api_key = _extract_bearer_token(x_api_key, authorization)
+
+    # If no validation keys are configured, skip
+    if not config.anthropic_api_key and not config.openai_api_key:
+        return
+
+    # Allow unauthenticated requests (Codex sends no auth header)
+    if not client_api_key:
+        return
+
+    # If a key IS provided, it must match one of the configured keys
+    if config.anthropic_api_key and client_api_key == config.anthropic_api_key:
+        return
+    if config.openai_api_key and client_api_key == config.openai_api_key:
+        return
+
+    logger.warning("Invalid API key provided by client (openai validation)")
+    raise HTTPException(status_code=401, detail="Invalid API key.")
 
 @router.post("/v1/messages")
 async def create_message(request: ClaudeMessagesRequest, http_request: Request, _: None = Depends(validate_api_key)):
@@ -120,6 +177,147 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
         logger.error(traceback.format_exc())
         error_message = openai_client.classify_openai_error(str(e))
         raise HTTPException(status_code=500, detail=error_message)
+
+
+# ============================================================
+# Responses API endpoints (Codex CLI)
+# ============================================================
+
+@router.post("/responses")
+@router.post("/v1/responses")
+async def create_response(http_request: Request, _: None = Depends(validate_openai_api_key)):
+    """Translate an OpenAI Responses API request to Chat Completions."""
+    try:
+        body = await http_request.json()
+        logger.debug(f"Responses API request: model={body.get('model')}, stream={body.get('stream')}")
+
+        request_id = str(uuid.uuid4())
+        cc_request = convert_responses_to_chat_completions(body)
+
+        if await http_request.is_disconnected():
+            raise HTTPException(status_code=499, detail="Client disconnected")
+
+        if cc_request.get("stream"):
+            try:
+                openai_stream = openai_client.create_chat_completion_stream(
+                    cc_request, request_id
+                )
+                return StreamingResponse(
+                    stream_responses_from_chat_completions(
+                        openai_stream, body, http_request, openai_client, request_id
+                    ),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Headers": "*",
+                    },
+                )
+            except HTTPException as e:
+                logger.error(f"Responses streaming error: {e.detail}")
+                return JSONResponse(
+                    status_code=e.status_code,
+                    content={"error": {"message": str(e.detail), "type": "api_error"}},
+                )
+        else:
+            openai_response = await openai_client.create_chat_completion(
+                cc_request, request_id
+            )
+            return build_response_object(openai_response, body)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        logger.error(f"Responses API error: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# Chat Completions pass-through (OpenCode and other tools)
+# ============================================================
+
+@router.post("/chat/completions")
+@router.post("/v1/chat/completions")
+async def chat_completions_passthrough(http_request: Request, _: None = Depends(validate_openai_api_key)):
+    """Forward Chat Completions requests to the upstream server unchanged."""
+    try:
+        body = await http_request.body()
+        body_json = json.loads(body)
+        stream = body_json.get("stream", False)
+
+        upstream_url = config.openai_base_url.rstrip("/") + "/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {config.openai_api_key}",
+        }
+        for k, v in custom_headers.items():
+            headers[k] = v
+
+        client = _get_httpx_client()
+
+        if stream:
+            upstream_req = client.build_request("POST", upstream_url, headers=headers, content=body)
+            upstream_resp = await client.send(upstream_req, stream=True)
+            if upstream_resp.status_code != 200:
+                resp_body = await upstream_resp.aread()
+                return JSONResponse(status_code=upstream_resp.status_code, content=json.loads(resp_body))
+
+            async def _stream():
+                try:
+                    async for line in upstream_resp.aiter_lines():
+                        yield f"{line}\n\n"
+                finally:
+                    await upstream_resp.aclose()
+
+            return StreamingResponse(
+                _stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "*",
+                },
+            )
+        else:
+            resp = await client.post(upstream_url, headers=headers, content=body)
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        logger.error(f"Chat completions pass-through error: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ============================================================
+# Models pass-through
+# ============================================================
+
+@router.get("/models")
+@router.get("/v1/models")
+async def list_models(_: None = Depends(validate_openai_api_key)):
+    """Forward /models request to the upstream server."""
+    try:
+        upstream_url = config.openai_base_url.rstrip("/") + "/models"
+        headers = {
+            "Authorization": f"Bearer {config.openai_api_key}",
+        }
+        for k, v in custom_headers.items():
+            headers[k] = v
+
+        client = _get_httpx_client()
+        resp = await client.get(upstream_url, headers=headers)
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+    except Exception as e:
+        logger.error(f"Models pass-through error: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.post("/v1/messages/count_tokens")
@@ -211,6 +409,28 @@ async def test_connection():
         )
 
 
+# ============================================================
+# Admin endpoints
+# ============================================================
+
+@router.post("/admin/reload")
+async def admin_reload(_: None = Depends(validate_api_key)):
+    """Trigger a graceful proxy reload via SIGHUP.
+
+    The server finishes in-flight requests, shuts down, and restarts
+    on the same port — all inside the same process.  No ECONNREFUSED.
+    """
+    os.kill(os.getpid(), signal.SIGHUP)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "reload_initiated",
+            "message": "Server will restart momentarily. Wait 2-3 seconds then check /health.",
+            "pid": os.getpid(),
+        },
+    )
+
+
 @router.get("/")
 async def root():
     """Root endpoint"""
@@ -227,8 +447,12 @@ async def root():
         },
         "endpoints": {
             "messages": "/v1/messages",
+            "responses": "/v1/responses",
+            "chat_completions": "/v1/chat/completions",
+            "models": "/v1/models",
             "count_tokens": "/v1/messages/count_tokens",
             "health": "/health",
             "test_connection": "/test-connection",
+            "admin_reload": "/admin/reload",
         },
     }
