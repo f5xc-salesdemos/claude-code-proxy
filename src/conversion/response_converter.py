@@ -1,8 +1,11 @@
 import json
+import logging
 import uuid
 from fastapi import HTTPException, Request
 from src.core.constants import Constants
 from src.models.claude import ClaudeMessagesRequest
+
+logger = logging.getLogger(__name__)
 
 
 def convert_openai_to_claude_response(
@@ -360,7 +363,16 @@ async def convert_openai_streaming_to_claude_with_cancellation(
             yield f"event: error\ndata: {json.dumps(error_event, ensure_ascii=False)}\n\n"
             return
         else:
-            raise
+            # Emit SSE error event instead of re-raising (which causes
+            # RuntimeError: "response already started" when HTTP headers
+            # have already been sent for the streaming response).
+            logger.error(f"HTTP {e.status_code} during streaming: {e.detail}")
+            error_event = {
+                "type": "error",
+                "error": {"type": "api_error", "message": str(e.detail)},
+            }
+            yield f"event: error\ndata: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+            return
     except Exception as e:
         # Handle any streaming errors gracefully
         logger.error(f"Streaming error: {e}")

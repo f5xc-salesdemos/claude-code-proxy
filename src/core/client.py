@@ -1,10 +1,14 @@
 import asyncio
 import json
+import logging
 from fastapi import HTTPException
 from typing import Optional, AsyncGenerator, Dict, Any
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from openai._exceptions import APIError, RateLimitError, AuthenticationError, BadRequestError
+from src.core.config import config
+
+logger = logging.getLogger(__name__)
 
 class OpenAIClient:
     """Async OpenAI client with cancellation support."""
@@ -84,15 +88,20 @@ class OpenAIClient:
             return completion.model_dump()
         
         except AuthenticationError as e:
+            logger.error(f"Upstream AuthenticationError: {e}")
             raise HTTPException(status_code=401, detail=self.classify_openai_error(str(e)))
         except RateLimitError as e:
+            logger.error(f"Upstream RateLimitError: {e}")
             raise HTTPException(status_code=429, detail=self.classify_openai_error(str(e)))
         except BadRequestError as e:
+            logger.error(f"Upstream BadRequestError: {e}")
             raise HTTPException(status_code=400, detail=self.classify_openai_error(str(e)))
         except APIError as e:
+            logger.error(f"Upstream APIError ({getattr(e, 'status_code', 'unknown')}): {e}")
             status_code = getattr(e, 'status_code', 500)
             raise HTTPException(status_code=status_code, detail=self.classify_openai_error(str(e)))
         except Exception as e:
+            logger.error(f"Unexpected upstream error: {e}")
             raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
         
         finally:
@@ -115,10 +124,28 @@ class OpenAIClient:
                 request["stream_options"] = {}
             request["stream_options"]["include_usage"] = True
             
-            # Create the streaming completion
-            streaming_completion = await self.client.chat.completions.create(**request)
+            # Create the streaming completion with retry for rate limits
+            max_retries = config.max_retries
+            last_error: Optional[RateLimitError] = None
+            streaming_completion = None
+            for attempt in range(max_retries + 1):
+                try:
+                    streaming_completion = await self.client.chat.completions.create(**request)
+                    last_error = None
+                    break  # Connection established successfully
+                except RateLimitError as e:
+                    last_error = e
+                    if attempt < max_retries:
+                        backoff = 2 ** (attempt + 1)  # 2s, 4s
+                        logger.warning(f"Upstream rate limited on connect, retry {attempt + 1}/{max_retries} after {backoff}s: {e}")
+                        await asyncio.sleep(backoff)
+                    else:
+                        logger.error(f"Upstream RateLimitError after {max_retries} retries: {e}")
             
-            async for chunk in streaming_completion:
+            if last_error is not None:
+                raise last_error  # Re-raise to be caught by outer RateLimitError handler
+            
+            async for chunk in streaming_completion:  # type: ignore[union-attr]
                 # Check for cancellation before yielding each chunk
                 if request_id and request_id in self.active_requests:
                     if self.active_requests[request_id].is_set():
@@ -133,15 +160,20 @@ class OpenAIClient:
             yield "data: [DONE]"
                 
         except AuthenticationError as e:
+            logger.error(f"Upstream AuthenticationError: {e}")
             raise HTTPException(status_code=401, detail=self.classify_openai_error(str(e)))
         except RateLimitError as e:
+            logger.error(f"Upstream RateLimitError: {e}")
             raise HTTPException(status_code=429, detail=self.classify_openai_error(str(e)))
         except BadRequestError as e:
+            logger.error(f"Upstream BadRequestError: {e}")
             raise HTTPException(status_code=400, detail=self.classify_openai_error(str(e)))
         except APIError as e:
+            logger.error(f"Upstream APIError ({getattr(e, 'status_code', 'unknown')}): {e}")
             status_code = getattr(e, 'status_code', 500)
             raise HTTPException(status_code=status_code, detail=self.classify_openai_error(str(e)))
         except Exception as e:
+            logger.error(f"Unexpected upstream error: {e}")
             raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
         
         finally:
@@ -151,6 +183,7 @@ class OpenAIClient:
 
     def classify_openai_error(self, error_detail: Any) -> str:
         """Provide specific error guidance for common OpenAI API issues."""
+        logger.debug(f"Classifying upstream error: {error_detail}")
         error_str = str(error_detail).lower()
         
         # Region/country restrictions
