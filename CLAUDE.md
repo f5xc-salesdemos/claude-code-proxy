@@ -122,6 +122,68 @@ When Claude Code generates commit messages on your behalf:
 
 Claude Code will directly apply proposed changes and modifications using the available tools, rather than describing them and asking you to implement them manually. This ensures a more efficient and direct workflow.
 
+## Proxy Management — CRITICAL
+
+This proxy runs at `localhost:8082` and serves as the API gateway for
+Claude Code itself.  **If you kill the proxy, you kill your own API
+connection and will be unable to recover.**
+
+### Rules
+
+1. **NEVER** use `pkill`, `kill`, `kill -9`, or any command that
+   terminates the proxy process.  Doing so causes `ECONNREFUSED` for
+   every client (including yourself) and typically results in an
+   unrecoverable retry loop.
+
+2. **To reload after code changes**, use the admin endpoint:
+
+   ```bash
+   curl -s -X POST http://localhost:8082/admin/reload \
+     -H "x-api-key: $ANTHROPIC_API_KEY"
+   ```
+
+   This sends `SIGHUP` to the server, which gracefully finishes
+   in-flight requests, shuts down, and restarts on the same port —
+   all inside the same process.
+
+3. **After triggering a reload**, wait 3 seconds then verify:
+
+   ```bash
+   sleep 3
+   curl -sf http://localhost:8082/health && echo "OK" || echo "FAIL"
+   ```
+
+4. **If the proxy is completely unresponsive** (not just reloading),
+   open a **new terminal** and run:
+
+   ```bash
+   start_claude_proxy
+   ```
+
+   This function is available in every shell (bash and zsh) and will
+   start a fresh proxy instance.
+
+5. **Alternatively**, reload via signal if you know the PID:
+
+   ```bash
+   kill -HUP $(pgrep -f 'start_proxy.py' | tail -1)
+   ```
+
+### Why this matters
+
+The proxy translates Anthropic Messages API requests into OpenAI Chat
+Completions requests.  Claude Code's `ANTHROPIC_BASE_URL` points at
+`http://localhost:8082`.  Killing the proxy process drops the listening
+socket, which means every subsequent API call gets `ECONNREFUSED`.
+Claude Code enters an exponential-backoff retry loop and exhausts all
+10 retries before the proxy can restart — resulting in a dead session
+that cannot recover.
+
+The graceful reload mechanism (`SIGHUP` / `/admin/reload`) avoids this
+entirely by keeping the process alive and restarting the server
+internally.
+
 ## Recent Changes
 
+- Added graceful reload mechanism (SIGHUP + /admin/reload endpoint)
 - Updated MIDDLE_MODEL config to default to BIG_MODEL value for consistency
