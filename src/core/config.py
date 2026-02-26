@@ -21,6 +21,9 @@ class Config:
         self.max_tokens_limit = int(os.environ.get("MAX_TOKENS_LIMIT", "4096"))
         self.min_tokens_limit = int(os.environ.get("MIN_TOKENS_LIMIT", "100"))
         
+        # SearXNG settings (for WebSearch interception)
+        self.searxng_url = os.environ.get("SEARXNG_URL", "http://searxng:8080")
+
         # Connection settings
         self.request_timeout = int(os.environ.get("REQUEST_TIMEOUT", "90"))
         self.max_retries = int(os.environ.get("MAX_RETRIES", "2"))

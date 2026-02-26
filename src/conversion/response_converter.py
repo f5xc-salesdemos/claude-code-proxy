@@ -1,6 +1,7 @@
 import json
 import logging
 import uuid
+from typing import Any, Dict, Optional
 from fastapi import HTTPException, Request
 from src.core.constants import Constants
 from src.models.claude import ClaudeMessagesRequest
@@ -8,10 +9,24 @@ from src.models.claude import ClaudeMessagesRequest
 logger = logging.getLogger(__name__)
 
 
+def _generate_server_tool_id() -> str:
+    return f"srvtoolu_{uuid.uuid4().hex[:24]}"
+
+
 def convert_openai_to_claude_response(
-    openai_response: dict, original_request: ClaudeMessagesRequest
+    openai_response: dict,
+    original_request: ClaudeMessagesRequest,
+    web_search_config: Optional[Dict[str, Any]] = None,
+    searxng_client=None,
 ) -> dict:
-    """Convert OpenAI response to Claude format."""
+    """Convert OpenAI response to Claude format.
+
+    NOTE: For web_search interception in non-streaming mode the caller
+    must have already executed the search and injected the results (since
+    this function is synchronous).  The ``web_search_config`` and
+    ``searxng_client`` params are accepted for signature consistency but
+    web_search handling is done in the endpoint layer for non-streaming.
+    """
 
     # Extract response data
     choices = openai_response.get("choices", [])
@@ -132,7 +147,7 @@ async def convert_openai_streaming_to_claude(
                     if "tool_calls" in delta:
                         for tc_delta in delta["tool_calls"]:
                             tc_index = tc_delta.get("index", 0)
-                            
+
                             # Initialize tool call tracking by index if not exists
                             if tc_index not in current_tool_calls:
                                 current_tool_calls[tc_index] = {
@@ -143,31 +158,31 @@ async def convert_openai_streaming_to_claude(
                                     "claude_index": None,
                                     "started": False
                                 }
-                            
+
                             tool_call = current_tool_calls[tc_index]
-                            
+
                             # Update tool call ID if provided
                             if tc_delta.get("id"):
                                 tool_call["id"] = tc_delta["id"]
-                            
+
                             # Update function name and start content block if we have both id and name
                             function_data = tc_delta.get(Constants.TOOL_FUNCTION, {})
                             if function_data.get("name"):
                                 tool_call["name"] = function_data["name"]
-                            
+
                             # Start content block when we have complete initial data
                             if (tool_call["id"] and tool_call["name"] and not tool_call["started"]):
                                 tool_block_counter += 1
                                 claude_index = text_block_index + tool_block_counter
                                 tool_call["claude_index"] = claude_index
                                 tool_call["started"] = True
-                                
+
                                 yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': claude_index, 'content_block': {'type': Constants.CONTENT_TOOL_USE, 'id': tool_call['id'], 'name': tool_call['name'], 'input': {}}}, ensure_ascii=False)}\n\n"
-                            
+
                             # Handle function arguments
                             if "arguments" in function_data and tool_call["started"] and function_data["arguments"] is not None:
                                 tool_call["args_buffer"] += function_data["arguments"]
-                                
+
                                 # Try to parse complete JSON and send delta when we have valid JSON
                                 try:
                                     json.loads(tool_call["args_buffer"])
@@ -223,6 +238,8 @@ async def convert_openai_streaming_to_claude_with_cancellation(
     http_request: Request,
     openai_client,
     request_id: str,
+    web_search_config: Optional[Dict[str, Any]] = None,
+    searxng_client=None,
 ):
     """Convert OpenAI streaming response to Claude streaming format with cancellation support."""
 
@@ -241,6 +258,7 @@ async def convert_openai_streaming_to_claude_with_cancellation(
     current_tool_calls = {}
     final_stop_reason = Constants.STOP_END_TURN
     usage_data = {"input_tokens": 0, "output_tokens": 0}
+    web_search_count = 0
 
     try:
         async for line in openai_stream:
@@ -291,7 +309,7 @@ async def convert_openai_streaming_to_claude_with_cancellation(
                     if "tool_calls" in delta and delta["tool_calls"]:
                         for tc_delta in delta["tool_calls"]:
                             tc_index = tc_delta.get("index", 0)
-                            
+
                             # Initialize tool call tracking by index if not exists
                             if tc_index not in current_tool_calls:
                                 current_tool_calls[tc_index] = {
@@ -300,33 +318,42 @@ async def convert_openai_streaming_to_claude_with_cancellation(
                                     "args_buffer": "",
                                     "json_sent": False,
                                     "claude_index": None,
-                                    "started": False
+                                    "started": False,
+                                    "is_web_search": False,
                                 }
-                            
+
                             tool_call = current_tool_calls[tc_index]
-                            
+
                             # Update tool call ID if provided
                             if tc_delta.get("id"):
                                 tool_call["id"] = tc_delta["id"]
-                            
+
                             # Update function name and start content block if we have both id and name
                             function_data = tc_delta.get(Constants.TOOL_FUNCTION, {})
                             if function_data.get("name"):
                                 tool_call["name"] = function_data["name"]
-                            
+                                if function_data["name"] == "web_search" and web_search_config:
+                                    tool_call["is_web_search"] = True
+
                             # Start content block when we have complete initial data
                             if (tool_call["id"] and tool_call["name"] and not tool_call["started"]):
                                 tool_block_counter += 1
                                 claude_index = text_block_index + tool_block_counter
                                 tool_call["claude_index"] = claude_index
                                 tool_call["started"] = True
-                                
-                                yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': claude_index, 'content_block': {'type': Constants.CONTENT_TOOL_USE, 'id': tool_call['id'], 'name': tool_call['name'], 'input': {}}}, ensure_ascii=False)}\n\n"
-                            
+
+                                if tool_call["is_web_search"]:
+                                    # Emit server_tool_use block for web search
+                                    server_tool_id = _generate_server_tool_id()
+                                    tool_call["server_tool_id"] = server_tool_id
+                                    yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': claude_index, 'content_block': {'type': Constants.CONTENT_SERVER_TOOL_USE, 'id': server_tool_id, 'name': 'web_search'}}, ensure_ascii=False)}\n\n"
+                                else:
+                                    yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': claude_index, 'content_block': {'type': Constants.CONTENT_TOOL_USE, 'id': tool_call['id'], 'name': tool_call['name'], 'input': {}}}, ensure_ascii=False)}\n\n"
+
                             # Handle function arguments
                             if "arguments" in function_data and tool_call["started"] and function_data["arguments"] is not None:
                                 tool_call["args_buffer"] += function_data["arguments"]
-                                
+
                                 # Try to parse complete JSON and send delta when we have valid JSON
                                 try:
                                     json.loads(tool_call["args_buffer"])
@@ -386,12 +413,51 @@ async def convert_openai_streaming_to_claude_with_cancellation(
         yield f"event: error\ndata: {json.dumps(error_event, ensure_ascii=False)}\n\n"
         return
 
-    # Send final SSE events
+    # Close the initial text block
     yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': text_block_index}, ensure_ascii=False)}\n\n"
 
+    # Close tool call blocks and handle web_search interception
     for tool_data in current_tool_calls.values():
-        if tool_data.get("started") and tool_data.get("claude_index") is not None:
-            yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': tool_data['claude_index']}, ensure_ascii=False)}\n\n"
+        if not tool_data.get("started") or tool_data.get("claude_index") is None:
+            continue
+
+        # Close the tool call content block (server_tool_use or tool_use)
+        yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': tool_data['claude_index']}, ensure_ascii=False)}\n\n"
+
+        # For web_search calls, execute search and emit result block
+        if tool_data.get("is_web_search") and searxng_client is not None:
+            web_search_count += 1
+            query = ""
+            try:
+                args = json.loads(tool_data.get("args_buffer", "{}"))
+                query = args.get("query", "")
+            except json.JSONDecodeError:
+                query = tool_data.get("args_buffer", "").strip('"')
+
+            logger.info(f"Executing SearXNG search for: {query}")
+            search_result = await searxng_client.search(query)
+
+            # Determine result content
+            if "error" in search_result:
+                result_content = search_result["error"]
+            else:
+                result_content = search_result.get("results", [])
+
+            # Emit web_search_tool_result block
+            tool_block_counter += 1
+            result_index = text_block_index + tool_block_counter
+            server_tool_id = tool_data.get("server_tool_id", _generate_server_tool_id())
+
+            yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': result_index, 'content_block': {'type': Constants.CONTENT_WEB_SEARCH_RESULT, 'tool_use_id': server_tool_id, 'content': result_content}}, ensure_ascii=False)}\n\n"
+            yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': result_index}, ensure_ascii=False)}\n\n"
+
+            # Override stop reason — model made a tool call but we fulfilled it
+            # so Claude Code should see end_turn and process the results inline
+            final_stop_reason = Constants.STOP_END_TURN
+
+    # Add server_tool_use usage tracking
+    if web_search_count > 0:
+        usage_data["server_tool_use"] = {"web_search_requests": web_search_count}
 
     yield f"event: {Constants.EVENT_MESSAGE_DELTA}\ndata: {json.dumps({'type': Constants.EVENT_MESSAGE_DELTA, 'delta': {'stop_reason': final_stop_reason, 'stop_sequence': None}, 'usage': usage_data}, ensure_ascii=False)}\n\n"
     yield f"event: {Constants.EVENT_MESSAGE_STOP}\ndata: {json.dumps({'type': Constants.EVENT_MESSAGE_STOP}, ensure_ascii=False)}\n\n"
