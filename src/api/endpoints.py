@@ -24,6 +24,7 @@ from src.conversion.responses_converter import (
     stream_responses_from_chat_completions,
 )
 from src.core.model_manager import model_manager
+from src.services.searxng import SearXNGClient
 
 router = APIRouter()
 
@@ -37,6 +38,9 @@ openai_client = OpenAIClient(
     api_version=config.azure_api_version,
     custom_headers=custom_headers,
 )
+
+# SearXNG client for WebSearch interception
+searxng_client = SearXNGClient(config.searxng_url)
 
 # Shared httpx client for pass-through requests
 _httpx_client: Optional[httpx.AsyncClient] = None
@@ -118,7 +122,21 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
         request_id = str(uuid.uuid4())
 
         # Convert Claude request to OpenAI format
-        openai_request = convert_claude_to_openai(request, model_manager)
+        openai_request, web_search_config = convert_claude_to_openai(request, model_manager)
+
+        # If web_search was requested, check SearXNG availability
+        if web_search_config and not await searxng_client.is_available():
+            logger.info("SearXNG not available, stripping web_search tool")
+            web_search_config = None
+            # Remove the synthetic web_search function tool from the request
+            if "tools" in openai_request:
+                openai_request["tools"] = [
+                    t for t in openai_request["tools"]
+                    if not (t.get("type") == "function" and
+                            t.get("function", {}).get("name") == "web_search")
+                ]
+                if not openai_request["tools"]:
+                    del openai_request["tools"]
 
         # Check if client disconnected before processing
         if await http_request.is_disconnected():
@@ -138,6 +156,8 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
                         http_request,
                         openai_client,
                         request_id,
+                        web_search_config=web_search_config,
+                        searxng_client=searxng_client if web_search_config else None,
                     ),
                     media_type="text/event-stream",
                     headers={
@@ -164,6 +184,26 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
             openai_response = await openai_client.create_chat_completion(
                 openai_request, request_id
             )
+
+            # Handle web_search interception for non-streaming
+            if web_search_config:
+                tool_calls = openai_response.get("choices", [{}])[0].get("message", {}).get("tool_calls", []) or []
+                for tc in tool_calls:
+                    func = tc.get("function", {})
+                    if func.get("name") == "web_search":
+                        try:
+                            args = json.loads(func.get("arguments", "{}"))
+                            query = args.get("query", "")
+                        except json.JSONDecodeError:
+                            query = ""
+                        if query:
+                            search_result = await searxng_client.search(query)
+                            # Inject results into the response
+                            # Build a modified response with server_tool_use + result
+                            return _build_non_streaming_web_search_response(
+                                openai_response, request, query, search_result
+                            )
+
             claude_response = convert_openai_to_claude_response(
                 openai_response, request
             )
@@ -177,6 +217,62 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
         logger.error(traceback.format_exc())
         error_message = openai_client.classify_openai_error(str(e))
         raise HTTPException(status_code=500, detail=error_message)
+
+
+def _build_non_streaming_web_search_response(
+    openai_response: dict,
+    original_request: ClaudeMessagesRequest,
+    query: str,
+    search_result: dict,
+) -> dict:
+    """Build a Claude response with web_search server_tool_use + result for non-streaming."""
+    from src.conversion.response_converter import _generate_server_tool_id
+
+    message = openai_response.get("choices", [{}])[0].get("message", {})
+    content_blocks = []
+
+    # Add text content if present
+    text_content = message.get("content")
+    if text_content:
+        content_blocks.append({"type": "text", "text": text_content})
+
+    # Add server_tool_use block
+    server_tool_id = _generate_server_tool_id()
+    content_blocks.append({
+        "type": "server_tool_use",
+        "id": server_tool_id,
+        "name": "web_search",
+        "input": {"query": query},
+    })
+
+    # Add web_search_tool_result block
+    if "error" in search_result:
+        result_content = search_result["error"]
+    else:
+        result_content = search_result.get("results", [])
+
+    content_blocks.append({
+        "type": "web_search_tool_result",
+        "tool_use_id": server_tool_id,
+        "content": result_content,
+    })
+
+    usage_data = {
+        "input_tokens": openai_response.get("usage", {}).get("prompt_tokens", 0),
+        "output_tokens": openai_response.get("usage", {}).get("completion_tokens", 0),
+        "server_tool_use": {"web_search_requests": 1},
+    }
+
+    return {
+        "id": openai_response.get("id", f"msg_{uuid.uuid4()}"),
+        "type": "message",
+        "role": "assistant",
+        "model": original_request.model,
+        "content": content_blocks,
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": usage_data,
+    }
 
 
 # ============================================================
@@ -367,6 +463,7 @@ async def health_check():
         "openai_api_configured": bool(config.openai_api_key),
         "api_key_valid": config.validate_api_key(),
         "client_api_key_validation": bool(config.anthropic_api_key),
+        "searxng_url": config.searxng_url,
     }
 
 
@@ -444,6 +541,7 @@ async def root():
             "client_api_key_validation": bool(config.anthropic_api_key),
             "big_model": config.big_model,
             "small_model": config.small_model,
+            "searxng_url": config.searxng_url,
         },
         "endpoints": {
             "messages": "/v1/messages",
