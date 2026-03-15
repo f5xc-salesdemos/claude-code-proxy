@@ -63,9 +63,14 @@ def convert_openai_to_claude_response(
                 }
             )
 
-    # Ensure at least one content block
+    # The Anthropic Messages API requires at least one content block.
+    # When the upstream model returns no text and no tool calls
+    # (extremely rare), use a minimal placeholder that won't trigger
+    # LiteLLM's empty-message sanitisation inside Open WebUI.  LiteLLM
+    # replaces empty/whitespace content with "[System: Empty message
+    # content sanitised to satisfy protocol]" which leaks into the UI.
     if not content_blocks:
-        content_blocks.append({"type": Constants.CONTENT_TEXT, "text": ""})
+        content_blocks.append({"type": Constants.CONTENT_TEXT, "text": "[no content]"})
 
     # Map finish reason
     finish_reason = choice.get("finish_reason", "stop")
@@ -106,11 +111,15 @@ async def convert_openai_streaming_to_claude(
     # Send initial SSE events
     yield f"event: {Constants.EVENT_MESSAGE_START}\ndata: {json.dumps({'type': Constants.EVENT_MESSAGE_START, 'message': {'id': message_id, 'type': 'message', 'role': Constants.ROLE_ASSISTANT, 'model': original_request.model, 'content': [], 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': 0, 'output_tokens': 0}}}, ensure_ascii=False)}\n\n"
 
-    yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': 0, 'content_block': {'type': Constants.CONTENT_TEXT, 'text': ''}}, ensure_ascii=False)}\n\n"
-
     yield f"event: {Constants.EVENT_PING}\ndata: {json.dumps({'type': Constants.EVENT_PING}, ensure_ascii=False)}\n\n"
 
     # Process streaming chunks
+    # Defer the text content_block_start until we actually receive text
+    # content from the model.  The real Anthropic API never sends an
+    # empty text block for tool_use-only responses; emitting one causes
+    # LiteLLM (inside Open WebUI) to inject "[System: Empty message
+    # content sanitised to satisfy protocol]" into subsequent turns.
+    text_block_started = False
     text_block_index = 0
     tool_block_counter = 0
     current_tool_calls = {}
@@ -139,8 +148,11 @@ async def convert_openai_streaming_to_claude(
                     delta = choice.get("delta", {})
                     finish_reason = choice.get("finish_reason")
 
-                    # Handle text delta
+                    # Handle text delta — open the text block on first text content
                     if delta and "content" in delta and delta["content"] is not None:
+                        if not text_block_started:
+                            yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': 0, 'content_block': {'type': Constants.CONTENT_TEXT, 'text': ''}}, ensure_ascii=False)}\n\n"
+                            text_block_started = True
                         yield f"event: {Constants.EVENT_CONTENT_BLOCK_DELTA}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_DELTA, 'index': text_block_index, 'delta': {'type': Constants.DELTA_TEXT, 'text': delta['content']}}, ensure_ascii=False)}\n\n"
 
                     # Handle tool call deltas with improved incremental processing
@@ -173,7 +185,8 @@ async def convert_openai_streaming_to_claude(
                             # Start content block when we have complete initial data
                             if (tool_call["id"] and tool_call["name"] and not tool_call["started"]):
                                 tool_block_counter += 1
-                                claude_index = text_block_index + tool_block_counter
+                                # If no text block was started, tool blocks start at 0
+                                claude_index = (text_block_index + tool_block_counter) if text_block_started else (tool_block_counter - 1)
                                 tool_call["claude_index"] = claude_index
                                 tool_call["started"] = True
 
@@ -219,8 +232,9 @@ async def convert_openai_streaming_to_claude(
         yield f"event: error\ndata: {json.dumps(error_event, ensure_ascii=False)}\n\n"
         return
 
-    # Send final SSE events
-    yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': text_block_index}, ensure_ascii=False)}\n\n"
+    # Send final SSE events — only close the text block if we opened one
+    if text_block_started:
+        yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': text_block_index}, ensure_ascii=False)}\n\n"
 
     for tool_data in current_tool_calls.values():
         if tool_data.get("started") and tool_data.get("claude_index") is not None:
@@ -248,11 +262,12 @@ async def convert_openai_streaming_to_claude_with_cancellation(
     # Send initial SSE events
     yield f"event: {Constants.EVENT_MESSAGE_START}\ndata: {json.dumps({'type': Constants.EVENT_MESSAGE_START, 'message': {'id': message_id, 'type': 'message', 'role': Constants.ROLE_ASSISTANT, 'model': original_request.model, 'content': [], 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': 0, 'output_tokens': 0}}}, ensure_ascii=False)}\n\n"
 
-    yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': 0, 'content_block': {'type': Constants.CONTENT_TEXT, 'text': ''}}, ensure_ascii=False)}\n\n"
-
     yield f"event: {Constants.EVENT_PING}\ndata: {json.dumps({'type': Constants.EVENT_PING}, ensure_ascii=False)}\n\n"
 
-    # Process streaming chunks
+    # Process streaming chunks — defer text content_block_start until we
+    # actually receive text.  Avoids triggering LiteLLM's empty-message
+    # sanitisation.  See comment in convert_openai_streaming_to_claude.
+    text_block_started = False
     text_block_index = 0
     tool_block_counter = 0
     current_tool_calls = {}
@@ -301,8 +316,11 @@ async def convert_openai_streaming_to_claude_with_cancellation(
                     delta = choice.get("delta", {})
                     finish_reason = choice.get("finish_reason")
 
-                    # Handle text delta
+                    # Handle text delta — open the text block on first text content
                     if delta and "content" in delta and delta["content"] is not None:
+                        if not text_block_started:
+                            yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': 0, 'content_block': {'type': Constants.CONTENT_TEXT, 'text': ''}}, ensure_ascii=False)}\n\n"
+                            text_block_started = True
                         yield f"event: {Constants.EVENT_CONTENT_BLOCK_DELTA}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_DELTA, 'index': text_block_index, 'delta': {'type': Constants.DELTA_TEXT, 'text': delta['content']}}, ensure_ascii=False)}\n\n"
 
                     # Handle tool call deltas with improved incremental processing
@@ -338,7 +356,8 @@ async def convert_openai_streaming_to_claude_with_cancellation(
                             # Start content block when we have complete initial data
                             if (tool_call["id"] and tool_call["name"] and not tool_call["started"]):
                                 tool_block_counter += 1
-                                claude_index = text_block_index + tool_block_counter
+                                # If no text block was started, tool blocks start at 0
+                                claude_index = (text_block_index + tool_block_counter) if text_block_started else (tool_block_counter - 1)
                                 tool_call["claude_index"] = claude_index
                                 tool_call["started"] = True
 
@@ -413,8 +432,9 @@ async def convert_openai_streaming_to_claude_with_cancellation(
         yield f"event: error\ndata: {json.dumps(error_event, ensure_ascii=False)}\n\n"
         return
 
-    # Close the initial text block
-    yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': text_block_index}, ensure_ascii=False)}\n\n"
+    # Close the text block only if we opened one
+    if text_block_started:
+        yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': text_block_index}, ensure_ascii=False)}\n\n"
 
     # Close tool call blocks and handle web_search interception
     for tool_data in current_tool_calls.values():
@@ -445,7 +465,7 @@ async def convert_openai_streaming_to_claude_with_cancellation(
 
             # Emit web_search_tool_result block
             tool_block_counter += 1
-            result_index = text_block_index + tool_block_counter
+            result_index = (text_block_index + tool_block_counter) if text_block_started else (tool_block_counter - 1)
             server_tool_id = tool_data.get("server_tool_id", _generate_server_tool_id())
 
             yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': result_index, 'content_block': {'type': Constants.CONTENT_WEB_SEARCH_RESULT, 'tool_use_id': server_tool_id, 'content': result_content}}, ensure_ascii=False)}\n\n"
