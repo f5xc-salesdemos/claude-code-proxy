@@ -249,7 +249,11 @@ def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
 
         if btype == Constants.CONTENT_TEXT:
             text = block.text if hasattr(block, "text") else block.get("text", "")
-            text_parts.append(text)
+            # Skip empty/whitespace-only text to avoid triggering
+            # LiteLLM's sanitisation which injects "[System: Empty
+            # message content sanitised to satisfy protocol]".
+            if text and text.strip():
+                text_parts.append(text)
 
         elif btype == Constants.CONTENT_TOOL_USE:
             block_id = block.id if hasattr(block, "id") else block.get("id", "")
