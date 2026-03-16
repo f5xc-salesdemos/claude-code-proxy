@@ -173,3 +173,23 @@ class TestModelRegistryDiscovery:
 
         # Original limits preserved since max_input_tokens was null
         assert registry.get_limits("claude-opus-4-6") == original_opus
+
+
+class TestModelRegistryEnvOverrides:
+    """Test environment variable overrides for model limits."""
+
+    def test_env_override_wins(self, monkeypatch):
+        """MODEL_MAX_INPUT_TOKENS_CLAUDE_OPUS_4_6 overrides default."""
+        monkeypatch.setenv("MODEL_MAX_INPUT_TOKENS_CLAUDE_OPUS_4_6", "500000")
+        registry = ModelRegistry(_make_config())
+        limits = registry.get_limits("claude-opus-4-6")
+        assert limits is not None
+        assert limits.max_input_tokens == 500000
+
+    def test_no_env_override_fallthrough(self, monkeypatch):
+        """Without env var, hardcoded default is used."""
+        monkeypatch.delenv("MODEL_MAX_INPUT_TOKENS_CLAUDE_OPUS_4_6", raising=False)
+        registry = ModelRegistry(_make_config())
+        limits = registry.get_limits("claude-opus-4-6")
+        assert limits is not None
+        assert limits.max_input_tokens == 1_000_000

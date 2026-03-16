@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import os
 from typing import TYPE_CHECKING, Dict, Optional
 
 import httpx
@@ -39,6 +40,37 @@ class ModelRegistry:
     def __init__(self, config: "Config") -> None:
         self.config = config
         self._limits: Dict[str, ModelLimits] = dict(_DEFAULT_LIMITS)
+        self._apply_env_overrides()
+
+    def _apply_env_overrides(self) -> None:
+        """Override model limits from ``MODEL_MAX_INPUT_TOKENS_*`` and ``MODEL_MAX_OUTPUT_TOKENS_*`` env vars."""
+        input_prefix = "MODEL_MAX_INPUT_TOKENS_"
+        output_prefix = "MODEL_MAX_OUTPUT_TOKENS_"
+        for env_key, env_value in os.environ.items():
+            if env_key.startswith(input_prefix):
+                model_key = env_key[len(input_prefix):].lower().replace("_", "-")
+            elif env_key.startswith(output_prefix):
+                model_key = env_key[len(output_prefix):].lower().replace("_", "-")
+            else:
+                continue
+
+            try:
+                value = int(env_value)
+            except (ValueError, TypeError):
+                logger.debug("Skipping non-integer env var %s=%r", env_key, env_value)
+                continue
+
+            if model_key in self._limits:
+                existing = self._limits[model_key]
+                if env_key.startswith(input_prefix):
+                    self._limits[model_key] = ModelLimits(value, existing.max_output_tokens)
+                else:
+                    self._limits[model_key] = ModelLimits(existing.max_input_tokens, value)
+            else:
+                if env_key.startswith(input_prefix):
+                    self._limits[model_key] = ModelLimits(value, 0)
+                else:
+                    self._limits[model_key] = ModelLimits(0, value)
 
     def get_limits(self, model_name: str) -> Optional[ModelLimits]:
         """Return ModelLimits for the given model name, or None if unknown."""
@@ -95,3 +127,6 @@ class ModelRegistry:
             self._limits[model_group] = ModelLimits(
                 int(max_input), int(max_output)
             )
+
+        # Re-apply env overrides so they remain highest priority after discovery
+        self._apply_env_overrides()
