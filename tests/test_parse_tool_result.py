@@ -1,7 +1,6 @@
 """Unit tests for parse_tool_result_content() in request_converter."""
 
 import json
-
 from src.conversion.request_converter import parse_tool_result_content
 
 

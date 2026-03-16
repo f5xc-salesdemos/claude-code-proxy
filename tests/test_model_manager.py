@@ -1,7 +1,6 @@
 """Unit tests for ModelManager."""
 
 from unittest.mock import MagicMock
-
 from src.core.model_manager import ModelManager
 
 

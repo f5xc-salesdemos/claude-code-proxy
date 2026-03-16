@@ -14,7 +14,6 @@ import logging
 import os
 
 from pythonjsonlogger.json import JsonFormatter
-
 from src.core.config import config
 
 _LOG_FORMAT_ENV = os.environ.get("LOG_FORMAT", "text").lower()

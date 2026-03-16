@@ -10,7 +10,6 @@ from typing import Any, Optional
 
 import httpx
 from fastapi import Request
-
 from src.core.client import OpenAIClient
 from src.core.config import Config
 from src.services.search.base import SearchProvider

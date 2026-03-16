@@ -3,7 +3,6 @@
 import os
 
 import pytest
-
 from src.core.config import Config
 
 

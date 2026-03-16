@@ -13,7 +13,6 @@ These tests verify that the proxy:
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from src.conversion.request_converter import (
     convert_claude_assistant_message,
     convert_claude_user_message,
