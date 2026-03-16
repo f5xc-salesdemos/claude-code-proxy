@@ -161,7 +161,10 @@ async def test_conversation_with_tool_use():
                 "model": "claude-3-5-sonnet-20241022",
                 "max_tokens": 200,
                 "messages": [
-                    {"role": "user", "content": "Calculate 25 * 4 using the calculator tool"}
+                    {
+                        "role": "user",
+                        "content": "Calculate 25 * 4 using the calculator tool",
+                    }
                 ],
                 "tools": [
                     {
@@ -234,7 +237,10 @@ async def test_token_counting():
             json={
                 "model": "claude-3-5-sonnet-20241022",
                 "messages": [
-                    {"role": "user", "content": "This is a test message for token counting."}
+                    {
+                        "role": "user",
+                        "content": "This is a test message for token counting.",
+                    }
                 ],
             },
         )

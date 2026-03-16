@@ -7,7 +7,12 @@ from typing import Any, AsyncGenerator, Dict, Optional, Union
 
 from fastapi import HTTPException
 from openai import AsyncAzureOpenAI, AsyncOpenAI
-from openai._exceptions import APIError, AuthenticationError, BadRequestError, RateLimitError
+from openai._exceptions import (
+    APIError,
+    AuthenticationError,
+    BadRequestError,
+    RateLimitError,
+)
 
 from src.core.config import config
 
@@ -30,7 +35,10 @@ class OpenAIClient:
         self.custom_headers = custom_headers or {}
 
         # Prepare default headers
-        default_headers = {"Content-Type": "application/json", "User-Agent": "claude-proxy/1.0.0"}
+        default_headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "claude-proxy/1.0.0",
+        }
 
         # Merge custom headers with default headers
         all_headers = {**default_headers, **self.custom_headers}
@@ -47,7 +55,10 @@ class OpenAIClient:
             )
         else:
             self.client = AsyncOpenAI(
-                api_key=api_key, base_url=base_url, timeout=timeout, default_headers=all_headers
+                api_key=api_key,
+                base_url=base_url,
+                timeout=timeout,
+                default_headers=all_headers,
             )
         self.active_requests: Dict[str, asyncio.Event] = {}
 
@@ -63,7 +74,9 @@ class OpenAIClient:
 
         try:
             # Create task that can be cancelled
-            completion_task = asyncio.create_task(self.client.chat.completions.create(**request))
+            completion_task = asyncio.create_task(
+                self.client.chat.completions.create(**request)
+            )
 
             if request_id:
                 # Wait for either completion or cancellation
@@ -83,7 +96,9 @@ class OpenAIClient:
                 # Check if request was cancelled
                 if cancel_task in done:
                     completion_task.cancel()
-                    raise HTTPException(status_code=499, detail="Request cancelled by client")
+                    raise HTTPException(
+                        status_code=499, detail="Request cancelled by client"
+                    )
 
                 completion = await completion_task
             else:
@@ -95,22 +110,32 @@ class OpenAIClient:
 
         except AuthenticationError as e:
             logger.error(f"Upstream AuthenticationError: {e}")
-            raise HTTPException(status_code=401, detail=self.classify_openai_error(str(e))) from e
+            raise HTTPException(
+                status_code=401, detail=self.classify_openai_error(str(e))
+            ) from e
         except RateLimitError as e:
             logger.error(f"Upstream RateLimitError: {e}")
-            raise HTTPException(status_code=429, detail=self.classify_openai_error(str(e))) from e
+            raise HTTPException(
+                status_code=429, detail=self.classify_openai_error(str(e))
+            ) from e
         except BadRequestError as e:
             logger.error(f"Upstream BadRequestError: {e}")
-            raise HTTPException(status_code=400, detail=self.classify_openai_error(str(e))) from e
+            raise HTTPException(
+                status_code=400, detail=self.classify_openai_error(str(e))
+            ) from e
         except APIError as e:
-            logger.error(f"Upstream APIError ({getattr(e, 'status_code', 'unknown')}): {e}")
+            logger.error(
+                f"Upstream APIError ({getattr(e, 'status_code', 'unknown')}): {e}"
+            )
             status_code = getattr(e, "status_code", 500)
             raise HTTPException(
                 status_code=status_code, detail=self.classify_openai_error(str(e))
             ) from e
         except Exception as e:
             logger.error(f"Unexpected upstream error: {e}")
-            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}") from e
+            raise HTTPException(
+                status_code=500, detail=f"Unexpected error: {str(e)}"
+            ) from e
 
         finally:
             # Clean up active request tracking
@@ -140,7 +165,9 @@ class OpenAIClient:
             streaming_completion = None
             for attempt in range(max_retries + 1):
                 try:
-                    streaming_completion = await self.client.chat.completions.create(**request)
+                    streaming_completion = await self.client.chat.completions.create(
+                        **request
+                    )
                     last_error = None
                     break  # Connection established successfully
                 except RateLimitError as e:
@@ -152,7 +179,9 @@ class OpenAIClient:
                         )
                         await asyncio.sleep(backoff)
                     else:
-                        logger.error(f"Upstream RateLimitError after {max_retries} retries: {e}")
+                        logger.error(
+                            f"Upstream RateLimitError after {max_retries} retries: {e}"
+                        )
 
             if last_error is not None:
                 raise last_error  # Re-raise to be caught by outer RateLimitError handler
@@ -161,7 +190,9 @@ class OpenAIClient:
                 # Check for cancellation before yielding each chunk
                 if request_id and request_id in self.active_requests:
                     if self.active_requests[request_id].is_set():
-                        raise HTTPException(status_code=499, detail="Request cancelled by client")
+                        raise HTTPException(
+                            status_code=499, detail="Request cancelled by client"
+                        )
 
                 # Convert chunk to SSE format matching original HTTP client format
                 chunk_dict = chunk.model_dump()
@@ -173,22 +204,32 @@ class OpenAIClient:
 
         except AuthenticationError as e:
             logger.error(f"Upstream AuthenticationError: {e}")
-            raise HTTPException(status_code=401, detail=self.classify_openai_error(str(e))) from e
+            raise HTTPException(
+                status_code=401, detail=self.classify_openai_error(str(e))
+            ) from e
         except RateLimitError as e:
             logger.error(f"Upstream RateLimitError: {e}")
-            raise HTTPException(status_code=429, detail=self.classify_openai_error(str(e))) from e
+            raise HTTPException(
+                status_code=429, detail=self.classify_openai_error(str(e))
+            ) from e
         except BadRequestError as e:
             logger.error(f"Upstream BadRequestError: {e}")
-            raise HTTPException(status_code=400, detail=self.classify_openai_error(str(e))) from e
+            raise HTTPException(
+                status_code=400, detail=self.classify_openai_error(str(e))
+            ) from e
         except APIError as e:
-            logger.error(f"Upstream APIError ({getattr(e, 'status_code', 'unknown')}): {e}")
+            logger.error(
+                f"Upstream APIError ({getattr(e, 'status_code', 'unknown')}): {e}"
+            )
             status_code = getattr(e, "status_code", 500)
             raise HTTPException(
                 status_code=status_code, detail=self.classify_openai_error(str(e))
             ) from e
         except Exception as e:
             logger.error(f"Unexpected upstream error: {e}")
-            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}") from e
+            raise HTTPException(
+                status_code=500, detail=f"Unexpected error: {str(e)}"
+            ) from e
 
         finally:
             # Clean up active request tracking
@@ -216,7 +257,9 @@ class OpenAIClient:
             return "Rate limit exceeded. Please wait and try again, or upgrade your API plan."
 
         # Model not found
-        if "model" in error_str and ("not found" in error_str or "does not exist" in error_str):
+        if "model" in error_str and (
+            "not found" in error_str or "does not exist" in error_str
+        ):
             return "Model not found. Please check your BIG_MODEL and SMALL_MODEL configuration."
 
         # Billing issues

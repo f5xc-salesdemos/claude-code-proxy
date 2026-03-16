@@ -25,7 +25,11 @@ async def test_non_streaming_cancellation():
                         "messages": [
                             {
                                 "role": "user",
-                                "content": "Write a very long story about a journey through space that takes at least 500 words.",
+                                "content": (
+                                    "Write a very long story about a"
+                                    " journey through space that"
+                                    " takes at least 500 words."
+                                ),
                             }
                         ],
                     },
@@ -62,7 +66,11 @@ async def test_streaming_cancellation():
                     "messages": [
                         {
                             "role": "user",
-                            "content": "Write a very long story about a journey through space that takes at least 500 words.",
+                            "content": (
+                                "Write a very long story about a"
+                                " journey through space that"
+                                " takes at least 500 words."
+                            ),
                         }
                     ],
                     "stream": True,

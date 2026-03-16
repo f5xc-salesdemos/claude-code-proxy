@@ -79,9 +79,10 @@ async def validate_api_key(
 
     # Validate the client API key
     if not client_api_key or not config.validate_client_api_key(client_api_key):
-        logger.warning(f"Invalid API key provided by client")
+        logger.warning("Invalid API key provided by client")
         raise HTTPException(
-            status_code=401, detail="Invalid API key. Please provide a valid Anthropic API key."
+            status_code=401,
+            detail="Invalid API key. Please provide a valid Anthropic API key.",
         )
 
 
@@ -119,16 +120,22 @@ async def validate_openai_api_key(
 
 @router.post("/v1/messages")
 async def create_message(
-    request: ClaudeMessagesRequest, http_request: Request, _: None = Depends(validate_api_key)
+    request: ClaudeMessagesRequest,
+    http_request: Request,
+    _: None = Depends(validate_api_key),
 ) -> Any:
     try:
-        logger.debug(f"Processing Claude request: model={request.model}, stream={request.stream}")
+        logger.debug(
+            f"Processing Claude request: model={request.model}, stream={request.stream}"
+        )
 
         # Generate unique request ID for cancellation tracking
         request_id = str(uuid.uuid4())
 
         # Convert Claude request to OpenAI format
-        openai_request, web_search_config = convert_claude_to_openai(request, model_manager)
+        openai_request, web_search_config = convert_claude_to_openai(
+            request, model_manager
+        )
 
         # If web_search was requested, check SearXNG availability
         if web_search_config and not await searxng_client.is_available():
@@ -190,12 +197,16 @@ async def create_message(
                 return JSONResponse(status_code=e.status_code, content=error_response)
         else:
             # Non-streaming response
-            openai_response = await openai_client.create_chat_completion(openai_request, request_id)
+            openai_response = await openai_client.create_chat_completion(
+                openai_request, request_id
+            )
 
             # Handle web_search interception for non-streaming
             if web_search_config:
                 tool_calls = (
-                    openai_response.get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
+                    openai_response.get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("tool_calls", [])
                     or []
                 )
                 for tc in tool_calls:
@@ -214,7 +225,9 @@ async def create_message(
                                 openai_response, request, query, search_result
                             )
 
-            claude_response = convert_openai_to_claude_response(openai_response, request)
+            claude_response = convert_openai_to_claude_response(
+                openai_response, request
+            )
             return claude_response
     except HTTPException:
         raise
@@ -294,7 +307,9 @@ def _build_non_streaming_web_search_response(
 
 @router.post("/responses")
 @router.post("/v1/responses")
-async def create_response(http_request: Request, _: None = Depends(validate_openai_api_key)) -> Any:
+async def create_response(
+    http_request: Request, _: None = Depends(validate_openai_api_key)
+) -> Any:
     """Translate an OpenAI Responses API request to Chat Completions."""
     try:
         body = await http_request.json()
@@ -310,7 +325,9 @@ async def create_response(http_request: Request, _: None = Depends(validate_open
 
         if cc_request.get("stream"):
             try:
-                openai_stream = openai_client.create_chat_completion_stream(cc_request, request_id)
+                openai_stream = openai_client.create_chat_completion_stream(
+                    cc_request, request_id
+                )
                 return StreamingResponse(
                     stream_responses_from_chat_completions(
                         openai_stream, body, http_request, openai_client, request_id
@@ -330,7 +347,9 @@ async def create_response(http_request: Request, _: None = Depends(validate_open
                     content={"error": {"message": str(e.detail), "type": "api_error"}},
                 )
         else:
-            openai_response = await openai_client.create_chat_completion(cc_request, request_id)
+            openai_response = await openai_client.create_chat_completion(
+                cc_request, request_id
+            )
             return build_response_object(openai_response, body)
 
     except HTTPException:
@@ -370,7 +389,9 @@ async def chat_completions_passthrough(
         client = _get_httpx_client()
 
         if stream:
-            upstream_req = client.build_request("POST", upstream_url, headers=headers, content=body)
+            upstream_req = client.build_request(
+                "POST", upstream_url, headers=headers, content=body
+            )
             upstream_resp = await client.send(upstream_req, stream=True)
             if upstream_resp.status_code != 200:
                 resp_body = await upstream_resp.aread()

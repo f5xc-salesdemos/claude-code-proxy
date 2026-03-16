@@ -124,7 +124,9 @@ class TestStreamingEmptyContentFiltering:
         logger = MagicMock()
 
         events = await _collect_streaming_events(
-            convert_openai_streaming_to_claude(_fake_openai_stream(chunks), request, logger)
+            convert_openai_streaming_to_claude(
+                _fake_openai_stream(chunks), request, logger
+            )
         )
         parsed = _parse_sse_events(events)
 
@@ -132,9 +134,12 @@ class TestStreamingEmptyContentFiltering:
         text_block_starts = [
             (et, d)
             for et, d in parsed
-            if et == "content_block_start" and d.get("content_block", {}).get("type") == "text"
+            if et == "content_block_start"
+            and d.get("content_block", {}).get("type") == "text"
         ]
-        assert text_block_starts == [], "Empty string delta should not open a text block"
+        assert (
+            text_block_starts == []
+        ), "Empty string delta should not open a text block"
 
     @pytest.mark.asyncio
     async def test_empty_string_delta_does_not_produce_text_delta(self):
@@ -148,14 +153,17 @@ class TestStreamingEmptyContentFiltering:
         logger = MagicMock()
 
         events = await _collect_streaming_events(
-            convert_openai_streaming_to_claude(_fake_openai_stream(chunks), request, logger)
+            convert_openai_streaming_to_claude(
+                _fake_openai_stream(chunks), request, logger
+            )
         )
         parsed = _parse_sse_events(events)
 
         text_deltas = [
             d
             for et, d in parsed
-            if et == "content_block_delta" and d.get("delta", {}).get("type") == "text_delta"
+            if et == "content_block_delta"
+            and d.get("delta", {}).get("type") == "text_delta"
         ]
         # Only the "hello" delta should appear
         assert len(text_deltas) == 1
@@ -172,7 +180,9 @@ class TestStreamingEmptyContentFiltering:
         logger = MagicMock()
 
         events = await _collect_streaming_events(
-            convert_openai_streaming_to_claude(_fake_openai_stream(chunks), request, logger)
+            convert_openai_streaming_to_claude(
+                _fake_openai_stream(chunks), request, logger
+            )
         )
         parsed = _parse_sse_events(events)
 
@@ -200,14 +210,17 @@ class TestStreamingEmptyContentFiltering:
         logger = MagicMock()
 
         events = await _collect_streaming_events(
-            convert_openai_streaming_to_claude(_fake_openai_stream(chunks), request, logger)
+            convert_openai_streaming_to_claude(
+                _fake_openai_stream(chunks), request, logger
+            )
         )
         parsed = _parse_sse_events(events)
 
         text_deltas = [
             d["delta"]["text"]
             for et, d in parsed
-            if et == "content_block_delta" and d.get("delta", {}).get("type") == "text_delta"
+            if et == "content_block_delta"
+            and d.get("delta", {}).get("type") == "text_delta"
         ]
         assert text_deltas == ["Hi"]
 
@@ -258,14 +271,17 @@ class TestStreamingEmptyContentFiltering:
         logger = MagicMock()
 
         events = await _collect_streaming_events(
-            convert_openai_streaming_to_claude(_fake_openai_stream(chunks), request, logger)
+            convert_openai_streaming_to_claude(
+                _fake_openai_stream(chunks), request, logger
+            )
         )
         parsed = _parse_sse_events(events)
 
         text_block_starts = [
             d
             for et, d in parsed
-            if et == "content_block_start" and d.get("content_block", {}).get("type") == "text"
+            if et == "content_block_start"
+            and d.get("content_block", {}).get("type") == "text"
         ]
         assert text_block_starts == [], "Tool-only stream should not emit text blocks"
 
@@ -304,7 +320,8 @@ class TestStreamingWithCancellationEmptyContent:
         text_deltas = [
             d["delta"]["text"]
             for et, d in parsed
-            if et == "content_block_delta" and d.get("delta", {}).get("type") == "text_delta"
+            if et == "content_block_delta"
+            and d.get("delta", {}).get("type") == "text_delta"
         ]
         assert text_deltas == ["world"]
 
@@ -336,7 +353,8 @@ class TestStreamingWithCancellationEmptyContent:
         text_blocks = [
             d
             for et, d in parsed
-            if et == "content_block_start" and d.get("content_block", {}).get("type") == "text"
+            if et == "content_block_start"
+            and d.get("content_block", {}).get("type") == "text"
         ]
         assert text_blocks == []
 
@@ -574,7 +592,9 @@ class TestFullRoundTrip:
         logger = MagicMock()
 
         events = await _collect_streaming_events(
-            convert_openai_streaming_to_claude(_fake_openai_stream(chunks), request, logger)
+            convert_openai_streaming_to_claude(
+                _fake_openai_stream(chunks), request, logger
+            )
         )
         parsed = _parse_sse_events(events)
 
@@ -582,7 +602,8 @@ class TestFullRoundTrip:
         text_deltas = [
             d["delta"]["text"]
             for et, d in parsed
-            if et == "content_block_delta" and d.get("delta", {}).get("type") == "text_delta"
+            if et == "content_block_delta"
+            and d.get("delta", {}).get("type") == "text_delta"
         ]
         # No text should have been streamed
         assert text_deltas == []
@@ -635,16 +656,21 @@ class TestStreamingWhitespaceOnlyDelta:
         logger = MagicMock()
 
         events = await _collect_streaming_events(
-            convert_openai_streaming_to_claude(_fake_openai_stream(chunks), request, logger)
+            convert_openai_streaming_to_claude(
+                _fake_openai_stream(chunks), request, logger
+            )
         )
         parsed = _parse_sse_events(events)
 
         text_block_starts = [
             (et, d)
             for et, d in parsed
-            if et == "content_block_start" and d.get("content_block", {}).get("type") == "text"
+            if et == "content_block_start"
+            and d.get("content_block", {}).get("type") == "text"
         ]
-        assert text_block_starts == [], "Whitespace-only delta should not open a text block"
+        assert (
+            text_block_starts == []
+        ), "Whitespace-only delta should not open a text block"
 
     @pytest.mark.asyncio
     async def test_whitespace_only_delta_filtered_with_cancellation(self):
@@ -675,7 +701,8 @@ class TestStreamingWhitespaceOnlyDelta:
         text_deltas = [
             d["delta"]["text"]
             for et, d in parsed
-            if et == "content_block_delta" and d.get("delta", {}).get("type") == "text_delta"
+            if et == "content_block_delta"
+            and d.get("delta", {}).get("type") == "text_delta"
         ]
         # Only "hello" should appear; whitespace-only "   " is filtered
         assert text_deltas == ["hello"]
@@ -785,7 +812,8 @@ class TestCancellationVariantParity:
         text_deltas = [
             d["delta"]["text"]
             for et, d in parsed
-            if et == "content_block_delta" and d.get("delta", {}).get("type") == "text_delta"
+            if et == "content_block_delta"
+            and d.get("delta", {}).get("type") == "text_delta"
         ]
         assert text_deltas == ["Hi"]
 
@@ -853,7 +881,8 @@ class TestCancellationVariantParity:
         text_block_starts = [
             d
             for et, d in parsed
-            if et == "content_block_start" and d.get("content_block", {}).get("type") == "text"
+            if et == "content_block_start"
+            and d.get("content_block", {}).get("type") == "text"
         ]
         assert (
             text_block_starts == []

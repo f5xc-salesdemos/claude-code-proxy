@@ -34,7 +34,10 @@ _WEB_SEARCH_OPENAI_TOOL = {
     "type": Constants.TOOL_FUNCTION,
     Constants.TOOL_FUNCTION: {
         "name": "web_search",
-        "description": "Search the web for current information. Returns results with titles, URLs, and content snippets.",
+        "description": (
+            "Search the web for current information."
+            " Returns results with titles, URLs, and content snippets."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -92,12 +95,17 @@ def convert_claude_to_openai(
             for block in claude_request.system:
                 if hasattr(block, "type") and block.type == Constants.CONTENT_TEXT:
                     text_parts.append(block.text)
-                elif isinstance(block, dict) and block.get("type") == Constants.CONTENT_TEXT:
+                elif (
+                    isinstance(block, dict)
+                    and block.get("type") == Constants.CONTENT_TEXT
+                ):
                     text_parts.append(block.get("text", ""))
             system_text = "\n\n".join(text_parts)
 
         if system_text.strip():
-            openai_messages.append({"role": Constants.ROLE_SYSTEM, "content": system_text.strip()})
+            openai_messages.append(
+                {"role": Constants.ROLE_SYSTEM, "content": system_text.strip()}
+            )
 
     # Process Claude messages
     i = 0
@@ -331,7 +339,9 @@ def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
 
         elif btype == Constants.CONTENT_WEB_SEARCH_RESULT:
             # web_search_tool_result — convert to an OpenAI tool message
-            tool_use_id = block.get("tool_use_id", "") if isinstance(block, dict) else ""
+            tool_use_id = (
+                block.get("tool_use_id", "") if isinstance(block, dict) else ""
+            )
             content = block.get("content", []) if isinstance(block, dict) else []
             # Summarise results as text for the upstream model
             if isinstance(content, list):
@@ -344,7 +354,8 @@ def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
                         result_texts.append(f"[{title}]({url})\n{snippet}")
                 summary = "\n\n".join(result_texts) if result_texts else "No results"
             elif (
-                isinstance(content, dict) and content.get("type") == "web_search_tool_result_error"
+                isinstance(content, dict)
+                and content.get("type") == "web_search_tool_result_error"
             ):
                 summary = f"Search error: {content.get('error_code', 'unknown')}"
             else:
