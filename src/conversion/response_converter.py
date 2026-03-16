@@ -26,10 +26,7 @@ def _generate_server_tool_id() -> str:
 
 def _sse_event(event_type: str, data: Dict[str, Any]) -> str:
     """Format a single SSE frame."""
-    return (
-        f"event: {event_type}\n"
-        f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-    )
+    return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def _map_finish_reason(finish_reason: Optional[str]) -> str:
@@ -184,9 +181,7 @@ async def convert_openai_streaming_to_claude(
         async for line in openai_stream:
             # Check if client disconnected (cancellation mode only)
             if cancellation_enabled and await http_request.is_disconnected():  # type: ignore[union-attr]
-                logger.info(
-                    "Client disconnected, cancelling request %s", request_id
-                )
+                logger.info("Client disconnected, cancelling request %s", request_id)
                 if openai_client is not None:
                     openai_client.cancel_request(request_id)
                 break
@@ -218,9 +213,7 @@ async def convert_openai_streaming_to_claude(
                 if not choices:
                     continue
             except json.JSONDecodeError as e:
-                logger.warning(
-                    "Failed to parse chunk: %s, error: %s", chunk_data, e
-                )
+                logger.warning("Failed to parse chunk: %s, error: %s", chunk_data, e)
                 continue
 
             choice = choices[0]
@@ -271,9 +264,7 @@ async def convert_openai_streaming_to_claude(
                     # Update counter (may have been incremented)
                     tool_block_counter = max(
                         tool_block_counter,
-                        sum(
-                            1 for tc in current_tool_calls.values() if tc["started"]
-                        ),
+                        sum(1 for tc in current_tool_calls.values() if tc["started"]),
                     )
 
             # Handle finish reason
@@ -371,9 +362,7 @@ async def convert_openai_streaming_to_claude(
                 if text_block_started
                 else (tool_block_counter - 1)
             )
-            server_tool_id = tool_data.get(
-                "server_tool_id", _generate_server_tool_id()
-            )
+            server_tool_id = tool_data.get("server_tool_id", _generate_server_tool_id())
 
             yield _sse_event(
                 Constants.EVENT_CONTENT_BLOCK_START,
