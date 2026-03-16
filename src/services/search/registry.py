@@ -8,6 +8,7 @@ The application retrieves an instance via ``get_provider("tavily")``.
 """
 
 from typing import Callable, Dict, List, Optional
+
 from src.services.search.base import SearchProvider
 
 # Internal registry: lowercase name → factory function
