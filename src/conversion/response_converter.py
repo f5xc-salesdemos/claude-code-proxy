@@ -39,9 +39,11 @@ def convert_openai_to_claude_response(
     # Build Claude content blocks
     content_blocks = []
 
-    # Add text content
+    # Add text content — skip empty/whitespace-only strings to avoid
+    # creating text blocks that LiteLLM would later sanitise with a
+    # visible placeholder.
     text_content = message.get("content")
-    if text_content is not None:
+    if isinstance(text_content, str) and text_content.strip():
         content_blocks.append({"type": Constants.CONTENT_TEXT, "text": text_content})
 
     # Add tool calls
@@ -148,8 +150,13 @@ async def convert_openai_streaming_to_claude(
                     delta = choice.get("delta", {})
                     finish_reason = choice.get("finish_reason")
 
-                    # Handle text delta — open the text block on first text content
-                    if delta and "content" in delta and delta["content"] is not None:
+                    # Handle text delta — open the text block on first text content.
+                    # Use delta.get("content") which is falsy for both None
+                    # and "" — empty string deltas are streaming protocol
+                    # artifacts, not meaningful content.  Also reject
+                    # whitespace-only deltas (e.g. "   ") which would open a
+                    # text block that LiteLLM later sanitises.
+                    if delta and delta.get("content") and delta["content"].strip():
                         if not text_block_started:
                             yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': 0, 'content_block': {'type': Constants.CONTENT_TEXT, 'text': ''}}, ensure_ascii=False)}\n\n"
                             text_block_started = True
@@ -316,8 +323,13 @@ async def convert_openai_streaming_to_claude_with_cancellation(
                     delta = choice.get("delta", {})
                     finish_reason = choice.get("finish_reason")
 
-                    # Handle text delta — open the text block on first text content
-                    if delta and "content" in delta and delta["content"] is not None:
+                    # Handle text delta — open the text block on first text content.
+                    # Use delta.get("content") which is falsy for both None
+                    # and "" — empty string deltas are streaming protocol
+                    # artifacts, not meaningful content.  Also reject
+                    # whitespace-only deltas (e.g. "   ") which would open a
+                    # text block that LiteLLM later sanitises.
+                    if delta and delta.get("content") and delta["content"].strip():
                         if not text_block_started:
                             yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': 0, 'content_block': {'type': Constants.CONTENT_TEXT, 'text': ''}}, ensure_ascii=False)}\n\n"
                             text_block_started = True

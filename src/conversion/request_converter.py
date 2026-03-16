@@ -7,6 +7,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Known placeholder strings injected by LiteLLM or our own proxy that
+# should be stripped from incoming conversation history to prevent
+# "[System: Empty message content sanitised to satisfy protocol]" from
+# leaking into the UI.
+_PLACEHOLDER_STRINGS = frozenset({
+    "[System: Empty message content sanitised to satisfy protocol]",
+    "[no content]",
+})
+
+
+def _is_placeholder_text(text: str) -> bool:
+    """Return True if text is a known placeholder that should be stripped."""
+    if not isinstance(text, str) or not text:
+        return False
+    return text.strip() in _PLACEHOLDER_STRINGS
+
+
 # Web search tool definition injected into OpenAI requests
 _WEB_SEARCH_OPENAI_TOOL = {
     "type": Constants.TOOL_FUNCTION,
@@ -186,6 +203,8 @@ def convert_claude_user_message(msg: ClaudeMessage) -> Dict[str, Any]:
         return {"role": Constants.ROLE_USER, "content": ""}
 
     if isinstance(msg.content, str):
+        if _is_placeholder_text(msg.content):
+            return {"role": Constants.ROLE_USER, "content": ""}
         return {"role": Constants.ROLE_USER, "content": msg.content}
 
     # Handle multimodal content
@@ -194,6 +213,8 @@ def convert_claude_user_message(msg: ClaudeMessage) -> Dict[str, Any]:
         btype = _block_type(block)
         if btype == Constants.CONTENT_TEXT:
             text = block.text if hasattr(block, "text") else block.get("text", "")
+            if _is_placeholder_text(text):
+                continue  # Skip placeholder text blocks
             openai_content.append({"type": "text", "text": text})
         elif btype == Constants.CONTENT_IMAGE:
             # Convert Claude image format to OpenAI format
@@ -212,6 +233,9 @@ def convert_claude_user_message(msg: ClaudeMessage) -> Dict[str, Any]:
                         },
                     }
                 )
+
+    if not openai_content:
+        return {"role": Constants.ROLE_USER, "content": ""}
 
     if len(openai_content) == 1 and openai_content[0]["type"] == "text":
         return {"role": Constants.ROLE_USER, "content": openai_content[0]["text"]}
@@ -239,6 +263,11 @@ def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
         }
 
     if isinstance(msg.content, str):
+        if _is_placeholder_text(msg.content):
+            return {
+                "message": {"role": Constants.ROLE_ASSISTANT, "content": None},
+                "extra_tool_messages": [],
+            }
         return {
             "message": {"role": Constants.ROLE_ASSISTANT, "content": msg.content},
             "extra_tool_messages": [],
@@ -249,10 +278,11 @@ def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
 
         if btype == Constants.CONTENT_TEXT:
             text = block.text if hasattr(block, "text") else block.get("text", "")
-            # Skip empty/whitespace-only text to avoid triggering
-            # LiteLLM's sanitisation which injects "[System: Empty
-            # message content sanitised to satisfy protocol]".
-            if text and text.strip():
+            # Skip empty/whitespace-only text and known placeholder
+            # strings to avoid triggering LiteLLM's sanitisation which
+            # injects "[System: Empty message content sanitised to
+            # satisfy protocol]".
+            if text and text.strip() and not _is_placeholder_text(text):
                 text_parts.append(text)
 
         elif btype == Constants.CONTENT_TOOL_USE:
