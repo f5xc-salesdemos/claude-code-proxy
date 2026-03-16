@@ -68,10 +68,10 @@ class TestConvertClaudeToolResults:
         """String content (not a list) returns empty list."""
         msg = ClaudeMessage(role="user", content="just a string")
         results = convert_claude_tool_results(msg)
-        assert results == []
+        assert not results
 
     def test_none_content_returns_empty(self):
         """None content returns empty list."""
         msg = ClaudeMessage(role="user", content=None)
         results = convert_claude_tool_results(msg)
-        assert results == []
+        assert not results

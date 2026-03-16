@@ -2,6 +2,7 @@
 
 import json
 import logging
+import traceback
 import uuid
 from typing import Any, AsyncGenerator, Dict, Optional
 
@@ -315,8 +316,6 @@ async def convert_openai_streaming_to_claude(
     except Exception as e:
         # Handle any streaming errors gracefully
         logger.error(f"Streaming error: {e}")
-        import traceback
-
         logger.error(traceback.format_exc())
         error_event = {
             "type": "error",
@@ -648,8 +647,6 @@ async def convert_openai_streaming_to_claude_with_cancellation(
     except Exception as e:
         # Handle any streaming errors gracefully
         logger.error(f"Streaming error: {e}")
-        import traceback
-
         logger.error(traceback.format_exc())
         error_event = {
             "type": "error",

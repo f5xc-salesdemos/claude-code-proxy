@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 from src.conversion.request_converter import convert_claude_to_openai
+from src.core.config import config
 from src.models.claude import ClaudeMessagesRequest
 
 
@@ -192,9 +193,6 @@ class TestConvertClaudeToOpenAI:
         """max_tokens is clamped between min and max limits."""
         req = _make_request(max_tokens=50)
         result, _ = convert_claude_to_openai(req, _mock_model_manager())
-        # Should be at least min_tokens_limit
-        from src.core.config import config
-
         assert result["max_tokens"] >= config.min_tokens_limit
         assert result["max_tokens"] <= config.max_tokens_limit
 
