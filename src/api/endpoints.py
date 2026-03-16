@@ -25,7 +25,7 @@ from src.conversion.responses_converter import (
 from src.core.client import OpenAIClient
 from src.core.config import config
 from src.core.logging import logger
-from src.core.model_manager import model_manager
+from src.core.model_manager import ModelManager
 from src.models.claude import ClaudeMessagesRequest, ClaudeTokenCountRequest
 from src.services.searxng import SearXNGClient
 
@@ -48,6 +48,9 @@ openai_client = OpenAIClient(
     api_version=config.azure_api_version,
     custom_headers=custom_headers,
 )
+
+# Model manager
+model_manager = ModelManager(config)
 
 # SearXNG client for WebSearch interception
 searxng_client = SearXNGClient(config.searxng_url)

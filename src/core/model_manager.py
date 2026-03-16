@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.core.config import config
-
 if TYPE_CHECKING:
     from src.core.config import Config
+
+# Passthrough prefixes — models from these providers are returned unchanged.
+_PASSTHROUGH_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "ep-", "doubao-", "deepseek-")
 
 
 class ModelManager:
@@ -17,20 +18,18 @@ class ModelManager:
         self.config = config
 
     def map_claude_model_to_openai(self, claude_model: str) -> str:
-        """Map Claude model names to OpenAI model names based on BIG/SMALL pattern"""
-        # If it's already an OpenAI model, return as-is
-        if claude_model.startswith("gpt-") or claude_model.startswith("o1-"):
+        """Map Claude model names to OpenAI model names based on tier.
+
+        Mapping:
+          - haiku  -> SMALL_MODEL
+          - sonnet -> MIDDLE_MODEL
+          - opus   -> BIG_MODEL
+
+        OpenAI, ARK, Doubao, and DeepSeek models are returned as-is.
+        """
+        if claude_model.startswith(_PASSTHROUGH_PREFIXES):
             return claude_model
 
-        # If it's other supported models (ARK/Doubao/DeepSeek), return as-is
-        if (
-            claude_model.startswith("ep-")
-            or claude_model.startswith("doubao-")
-            or claude_model.startswith("deepseek-")
-        ):
-            return claude_model
-
-        # Map based on model naming patterns
         model_lower = claude_model.lower()
         if "haiku" in model_lower:
             return str(self.config.small_model)
@@ -40,6 +39,3 @@ class ModelManager:
             return str(self.config.big_model)
         # Default to big model for unknown models
         return str(self.config.big_model)
-
-
-model_manager = ModelManager(config)
