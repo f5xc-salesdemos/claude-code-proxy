@@ -1,4 +1,10 @@
-# Anthropic Web Search Tool Specification
+---
+title: Web Search Tool Specification
+description: Anthropic server_tool_use / web_search_tool_result content block specification
+sidebar:
+  label: Web Search Spec
+  order: 1
+---
 
 > Reverse-engineered from the Anthropic API documentation,
 > Python SDK (`anthropic-sdk-python`) type definitions,
