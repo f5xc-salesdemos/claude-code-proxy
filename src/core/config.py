@@ -1,93 +1,108 @@
 """Application configuration loaded from environment variables."""
 
+import logging
 import os
 import sys
-from typing import Dict
+from typing import Dict, Optional
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings
+
+_VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
 
-class Config:
-    """Proxy configuration sourced from environment variables."""
+class Config(BaseSettings):
+    """Proxy configuration sourced from environment variables.
 
-    def __init__(self) -> None:
-        openai_api_key = os.environ.get("OPENAI_API_KEY")
-        if not openai_api_key:
-            raise ValueError("OPENAI_API_KEY not found in environment variables")
-        self.openai_api_key: str = openai_api_key
+    All fields are read from environment variables automatically.
+    Prefix-less variable names match 1-to-1 with field names
+    (case-insensitive on the env var side).
+    """
 
-        # Add Anthropic API key for client validation
-        self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not self.anthropic_api_key:
-            print(
-                "Warning: ANTHROPIC_API_KEY not set. Client API key validation will be disabled."
-            )
+    # Required
+    openai_api_key: str
 
-        self.openai_base_url = os.environ.get(
-            "OPENAI_BASE_URL", "https://api.openai.com/v1"
-        )
-        self.azure_api_version = os.environ.get("AZURE_API_VERSION")  # For Azure OpenAI
-        self.host = os.environ.get("HOST", "0.0.0.0")
-        self.port = int(os.environ.get("PORT", "8082"))
-        self.log_level = os.environ.get("LOG_LEVEL", "INFO")
-        self.max_tokens_limit = int(os.environ.get("MAX_TOKENS_LIMIT", "4096"))
-        self.min_tokens_limit = int(os.environ.get("MIN_TOKENS_LIMIT", "100"))
+    # Optional API keys
+    anthropic_api_key: Optional[str] = None
 
-        # SearXNG settings (for WebSearch interception)
-        self.searxng_url = os.environ.get("SEARXNG_URL", "http://searxng:8080")
+    # Server
+    openai_base_url: str = "https://api.openai.com/v1"
+    azure_api_version: Optional[str] = None
+    host: str = "0.0.0.0"
+    port: int = 8082
+    log_level: str = "INFO"
 
-        # Connection settings
-        self.request_timeout = int(os.environ.get("REQUEST_TIMEOUT", "90"))
-        self.max_retries = int(os.environ.get("MAX_RETRIES", "2"))
+    # Token limits
+    max_tokens_limit: int = 4096
+    min_tokens_limit: int = 100
 
-        # Model settings - BIG and SMALL models
-        self.big_model = os.environ.get("BIG_MODEL", "gpt-4o")
-        self.middle_model = os.environ.get("MIDDLE_MODEL", self.big_model)
-        self.small_model = os.environ.get("SMALL_MODEL", "gpt-4o-mini")
+    # SearXNG
+    searxng_url: str = "http://searxng:8080"
 
-    def validate_api_key(self) -> bool:
-        """Basic API key validation"""
-        if not self.openai_api_key:
-            return False
-        # Basic format check for OpenAI API keys
-        if not self.openai_api_key.startswith("sk-"):
-            return False
-        return True
+    # Connection
+    request_timeout: int = 90
+    max_retries: int = 2
+
+    # Model mappings
+    big_model: str = "gpt-4o"
+    middle_model: Optional[str] = None
+    small_model: str = "gpt-4o-mini"
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, v: str) -> str:
+        """Accept values like 'INFO # comment' and normalize to upper case."""
+        level = str(v).split()[0].upper()
+        if level not in _VALID_LOG_LEVELS:
+            return "INFO"
+        return level
+
+    @field_validator("middle_model", mode="before")
+    @classmethod
+    def _default_middle_to_big(cls, v: Optional[str]) -> Optional[str]:
+        """Keep None so model_post_init can resolve it from big_model."""
+        return v if v else None
+
+    def model_post_init(self, __context: object) -> None:
+        """Resolve middle_model default after all fields are set."""
+        if self.middle_model is None:
+            # Use object.__setattr__ because the model is frozen-ish in v2
+            object.__setattr__(self, "middle_model", self.big_model)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def validate_client_api_key(self, client_api_key: str) -> bool:
-        """Validate client's Anthropic API key"""
-        # If no ANTHROPIC_API_KEY is set in environment, skip validation
+        """Validate client's Anthropic API key.
+
+        If no ``ANTHROPIC_API_KEY`` is configured, all keys are accepted.
+        """
         if not self.anthropic_api_key:
             return True
-
-        # Check if the client's API key matches the expected value
         return client_api_key == self.anthropic_api_key
 
     def get_custom_headers(self) -> Dict[str, str]:
-        """Get custom headers from environment variables"""
-        custom_headers = {}
+        """Build custom headers from ``CUSTOM_HEADER_*`` env vars.
 
-        # Get all environment variables
-        env_vars = dict(os.environ)
-
-        # Find CUSTOM_HEADER_* environment variables
-        for env_key, env_value in env_vars.items():
+        ``CUSTOM_HEADER_X_MY_HEADER=value`` becomes ``X-MY-HEADER: value``.
+        """
+        custom_headers: Dict[str, str] = {}
+        for env_key, env_value in os.environ.items():
             if env_key.startswith("CUSTOM_HEADER_"):
-                # Convert CUSTOM_HEADER_KEY to Header-Key
-                # Remove 'CUSTOM_HEADER_' prefix and convert to header format
-                header_name = env_key[14:]  # Remove 'CUSTOM_HEADER_' prefix
-
-                if header_name:  # Make sure it's not empty
-                    # Convert underscores to hyphens for HTTP header format
+                header_name = env_key[14:]  # strip prefix
+                if header_name:
                     header_name = header_name.replace("_", "-")
                     custom_headers[header_name] = env_value
-
         return custom_headers
 
 
 try:
-    config = Config()
-    print(
-        f" Configuration loaded: API_KEY={'*' * 20}..., BASE_URL='{config.openai_base_url}'"
-    )
+    config = Config()  # type: ignore[call-arg]
+    if not config.anthropic_api_key:
+        logging.getLogger(__name__).warning(
+            "ANTHROPIC_API_KEY not set — client API key validation disabled"
+        )
 except Exception as e:
-    print(f"=4 Configuration Error: {e}")
+    print(f"Configuration Error: {e}")
     sys.exit(1)
