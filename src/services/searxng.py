@@ -1,5 +1,5 @@
-import time
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -23,7 +23,10 @@ class SearXNGClient:
 
     async def is_available(self) -> bool:
         now = time.monotonic()
-        if self._available is not None and (now - self._available_checked_at) < self._availability_ttl:
+        if (
+            self._available is not None
+            and (now - self._available_checked_at) < self._availability_ttl
+        ):
             return self._available
         try:
             resp = await self._client.get(self.base_url, timeout=3.0)

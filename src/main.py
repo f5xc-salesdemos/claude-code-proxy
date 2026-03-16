@@ -50,9 +50,7 @@ def main():
         print("Optional environment variables:")
         print("  ANTHROPIC_API_KEY - Expected Anthropic API key for client validation")
         print("                      If set, clients must provide this exact API key")
-        print(
-            f"  OPENAI_BASE_URL - OpenAI API base URL (default: https://api.openai.com/v1)"
-        )
+        print(f"  OPENAI_BASE_URL - OpenAI API base URL (default: https://api.openai.com/v1)")
         print(f"  BIG_MODEL - Model for opus requests (default: gpt-4o)")
         print(f"  MIDDLE_MODEL - Model for sonnet requests (default: gpt-4o)")
         print(f"  SMALL_MODEL - Model for haiku requests (default: gpt-4o-mini)")
@@ -79,8 +77,7 @@ def main():
     print(f"   Request Timeout: {config.request_timeout}s")
     print(f"   Server: {config.host}:{config.port}")
     print(
-        f"   Client API Key Validation: "
-        f"{'Enabled' if config.anthropic_api_key else 'Disabled'}"
+        f"   Client API Key Validation: " f"{'Enabled' if config.anthropic_api_key else 'Disabled'}"
     )
     print(f"   Graceful reload: kill -HUP {os.getpid()}  or  POST /admin/reload")
     print("")

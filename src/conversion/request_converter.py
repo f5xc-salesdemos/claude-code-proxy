@@ -1,9 +1,10 @@
 import json
-from typing import Dict, Any, List, Optional, Tuple
-from src.core.constants import Constants
-from src.models.claude import ClaudeMessagesRequest, ClaudeMessage
-from src.core.config import config
 import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+from src.core.config import config
+from src.core.constants import Constants
+from src.models.claude import ClaudeMessage, ClaudeMessagesRequest
 
 logger = logging.getLogger(__name__)
 
@@ -11,10 +12,12 @@ logger = logging.getLogger(__name__)
 # should be stripped from incoming conversation history to prevent
 # "[System: Empty message content sanitised to satisfy protocol]" from
 # leaking into the UI.
-_PLACEHOLDER_STRINGS = frozenset({
-    "[System: Empty message content sanitised to satisfy protocol]",
-    "[no content]",
-})
+_PLACEHOLDER_STRINGS = frozenset(
+    {
+        "[System: Empty message content sanitised to satisfy protocol]",
+        "[no content]",
+    }
+)
 
 
 def _is_placeholder_text(text: str) -> bool:
@@ -87,17 +90,12 @@ def convert_claude_to_openai(
             for block in claude_request.system:
                 if hasattr(block, "type") and block.type == Constants.CONTENT_TEXT:
                     text_parts.append(block.text)
-                elif (
-                    isinstance(block, dict)
-                    and block.get("type") == Constants.CONTENT_TEXT
-                ):
+                elif isinstance(block, dict) and block.get("type") == Constants.CONTENT_TEXT:
                     text_parts.append(block.get("text", ""))
             system_text = "\n\n".join(text_parts)
 
         if system_text.strip():
-            openai_messages.append(
-                {"role": Constants.ROLE_SYSTEM, "content": system_text.strip()}
-            )
+            openai_messages.append({"role": Constants.ROLE_SYSTEM, "content": system_text.strip()})
 
     # Process Claude messages
     i = 0
@@ -330,7 +328,9 @@ def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
                         snippet = r.get("encrypted_content", "")
                         result_texts.append(f"[{title}]({url})\n{snippet}")
                 summary = "\n\n".join(result_texts) if result_texts else "No results"
-            elif isinstance(content, dict) and content.get("type") == "web_search_tool_result_error":
+            elif (
+                isinstance(content, dict) and content.get("type") == "web_search_tool_result_error"
+            ):
                 summary = f"Search error: {content.get('error_code', 'unknown')}"
             else:
                 summary = str(content)
@@ -369,7 +369,11 @@ def convert_claude_tool_results(msg: ClaudeMessage) -> List[Dict[str, Any]]:
             btype = _block_type(block)
             if btype == Constants.CONTENT_TOOL_RESULT:
                 content_val = block.content if hasattr(block, "content") else block.get("content")
-                tool_use_id = block.tool_use_id if hasattr(block, "tool_use_id") else block.get("tool_use_id", "")
+                tool_use_id = (
+                    block.tool_use_id
+                    if hasattr(block, "tool_use_id")
+                    else block.get("tool_use_id", "")
+                )
                 content = parse_tool_result_content(content_val)
                 tool_messages.append(
                     {

@@ -70,14 +70,16 @@ def convert_responses_to_chat_completions(body: dict) -> dict:
             tool_type = tool.get("type", "")
             if tool_type == "function":
                 fn = tool.get("function") or tool
-                cc_tools.append({
-                    "type": "function",
-                    "function": {
-                        "name": fn.get("name", ""),
-                        "description": fn.get("description", ""),
-                        "parameters": fn.get("parameters", {}),
-                    },
-                })
+                cc_tools.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": fn.get("name", ""),
+                            "description": fn.get("description", ""),
+                            "parameters": fn.get("parameters", {}),
+                        },
+                    }
+                )
         if cc_tools:
             cc_request["tools"] = cc_tools
 
@@ -136,21 +138,25 @@ def _convert_input_items(items: list, messages: list[dict]) -> None:
                 pending_assistant = {"role": "assistant", "content": None, "tool_calls": []}
             elif "tool_calls" not in pending_assistant:
                 pending_assistant["tool_calls"] = []
-            pending_assistant["tool_calls"].append({
-                "id": call_id,
-                "type": "function",
-                "function": {"name": name, "arguments": arguments},
-            })
+            pending_assistant["tool_calls"].append(
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": name, "arguments": arguments},
+                }
+            )
 
         elif item_type == "function_call_output":
             _flush_assistant()
             call_id = item.get("call_id", "")
             output = item.get("output", "")
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call_id,
-                "content": output if isinstance(output, str) else json.dumps(output),
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": output if isinstance(output, str) else json.dumps(output),
+                }
+            )
 
         elif item_type in ("local_shell_call",):
             # Treat like function_call
@@ -160,21 +166,25 @@ def _convert_input_items(items: list, messages: list[dict]) -> None:
                 pending_assistant = {"role": "assistant", "content": None, "tool_calls": []}
             elif "tool_calls" not in pending_assistant:
                 pending_assistant["tool_calls"] = []
-            pending_assistant["tool_calls"].append({
-                "id": call_id,
-                "type": "function",
-                "function": {"name": "local_shell", "arguments": args},
-            })
+            pending_assistant["tool_calls"].append(
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": "local_shell", "arguments": args},
+                }
+            )
 
         elif item_type == "local_shell_call_output":
             _flush_assistant()
             call_id = item.get("call_id", "")
             output = item.get("output", "")
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call_id,
-                "content": output if isinstance(output, str) else json.dumps(output),
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": output if isinstance(output, str) else json.dumps(output),
+                }
+            )
 
         elif item_type == "reasoning":
             # Skip reasoning items
@@ -185,7 +195,9 @@ def _convert_input_items(items: list, messages: list[dict]) -> None:
             text = item.get("text", item.get("content", ""))
             if text:
                 _flush_assistant()
-                messages.append({"role": "user", "content": text if isinstance(text, str) else json.dumps(text)})
+                messages.append(
+                    {"role": "user", "content": text if isinstance(text, str) else json.dumps(text)}
+                )
 
     _flush_assistant()
 
@@ -206,26 +218,30 @@ def build_response_object(openai_response: dict, original_body: dict) -> dict:
     # Text content → output_text item
     text_content = message.get("content")
     if text_content is not None:
-        output.append({
-            "type": "message",
-            "id": f"msg_{uuid.uuid4().hex[:24]}",
-            "role": "assistant",
-            "status": "completed",
-            "content": [{"type": "output_text", "text": text_content, "annotations": []}],
-        })
+        output.append(
+            {
+                "type": "message",
+                "id": f"msg_{uuid.uuid4().hex[:24]}",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": text_content, "annotations": []}],
+            }
+        )
 
     # Tool calls → function_call items
     tool_calls = message.get("tool_calls") or []
     for tc in tool_calls:
         fn = tc.get("function", {})
-        output.append({
-            "type": "function_call",
-            "id": f"fc_{uuid.uuid4().hex[:24]}",
-            "call_id": tc.get("id", f"call_{uuid.uuid4().hex[:24]}"),
-            "name": fn.get("name", ""),
-            "arguments": fn.get("arguments", "{}"),
-            "status": "completed",
-        })
+        output.append(
+            {
+                "type": "function_call",
+                "id": f"fc_{uuid.uuid4().hex[:24]}",
+                "call_id": tc.get("id", f"call_{uuid.uuid4().hex[:24]}"),
+                "name": fn.get("name", ""),
+                "arguments": fn.get("arguments", "{}"),
+                "status": "completed",
+            }
+        )
 
     # Map finish_reason to status
     status_map = {
@@ -276,29 +292,35 @@ async def stream_responses_from_chat_completions(
     tool_output_index = 1  # output array index (0 = message)
 
     # -- response.created
-    yield _sse("response.created", {
-        "type": "response.created",
-        "response": {
-            "id": response_id,
-            "object": "response",
-            "status": "in_progress",
-            "model": model,
-            "output": [],
-            "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+    yield _sse(
+        "response.created",
+        {
+            "type": "response.created",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "status": "in_progress",
+                "model": model,
+                "output": [],
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            },
         },
-    })
+    )
 
     # -- response.in_progress
-    yield _sse("response.in_progress", {
-        "type": "response.in_progress",
-        "response": {
-            "id": response_id,
-            "object": "response",
-            "status": "in_progress",
-            "model": model,
-            "output": [],
+    yield _sse(
+        "response.in_progress",
+        {
+            "type": "response.in_progress",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "status": "in_progress",
+                "model": model,
+                "output": [],
+            },
         },
-    })
+    )
 
     final_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
@@ -344,34 +366,43 @@ async def stream_responses_from_chat_completions(
                     if not text_started:
                         text_started = True
                         # output_item.added for the message
-                        yield _sse("response.output_item.added", {
-                            "type": "response.output_item.added",
-                            "output_index": text_content_index,
-                            "item": {
-                                "type": "message",
-                                "id": msg_id,
-                                "role": "assistant",
-                                "status": "in_progress",
-                                "content": [],
+                        yield _sse(
+                            "response.output_item.added",
+                            {
+                                "type": "response.output_item.added",
+                                "output_index": text_content_index,
+                                "item": {
+                                    "type": "message",
+                                    "id": msg_id,
+                                    "role": "assistant",
+                                    "status": "in_progress",
+                                    "content": [],
+                                },
                             },
-                        })
+                        )
                         # content_part.added
-                        yield _sse("response.content_part.added", {
-                            "type": "response.content_part.added",
+                        yield _sse(
+                            "response.content_part.added",
+                            {
+                                "type": "response.content_part.added",
+                                "item_id": msg_id,
+                                "output_index": text_content_index,
+                                "content_index": 0,
+                                "part": {"type": "output_text", "text": "", "annotations": []},
+                            },
+                        )
+
+                    text_buffer += text_chunk
+                    yield _sse(
+                        "response.output_text.delta",
+                        {
+                            "type": "response.output_text.delta",
                             "item_id": msg_id,
                             "output_index": text_content_index,
                             "content_index": 0,
-                            "part": {"type": "output_text", "text": "", "annotations": []},
-                        })
-
-                    text_buffer += text_chunk
-                    yield _sse("response.output_text.delta", {
-                        "type": "response.output_text.delta",
-                        "item_id": msg_id,
-                        "output_index": text_content_index,
-                        "content_index": 0,
-                        "delta": text_chunk,
-                    })
+                            "delta": text_chunk,
+                        },
+                    )
 
                 # --- Tool call deltas ---
                 if delta.get("tool_calls"):
@@ -401,50 +432,72 @@ async def stream_responses_from_chat_completions(
                             tc["id"] = f"fc_{uuid.uuid4().hex[:24]}"
                             # Close text item first if it was open
                             if text_started:
-                                yield _sse("response.content_part.done", {
-                                    "type": "response.content_part.done",
-                                    "item_id": msg_id,
-                                    "output_index": text_content_index,
-                                    "content_index": 0,
-                                    "part": {"type": "output_text", "text": text_buffer, "annotations": []},
-                                })
-                                yield _sse("response.output_item.done", {
-                                    "type": "response.output_item.done",
-                                    "output_index": text_content_index,
-                                    "item": {
-                                        "type": "message",
-                                        "id": msg_id,
-                                        "role": "assistant",
-                                        "status": "completed",
-                                        "content": [{"type": "output_text", "text": text_buffer, "annotations": []}],
+                                yield _sse(
+                                    "response.content_part.done",
+                                    {
+                                        "type": "response.content_part.done",
+                                        "item_id": msg_id,
+                                        "output_index": text_content_index,
+                                        "content_index": 0,
+                                        "part": {
+                                            "type": "output_text",
+                                            "text": text_buffer,
+                                            "annotations": [],
+                                        },
                                     },
-                                })
+                                )
+                                yield _sse(
+                                    "response.output_item.done",
+                                    {
+                                        "type": "response.output_item.done",
+                                        "output_index": text_content_index,
+                                        "item": {
+                                            "type": "message",
+                                            "id": msg_id,
+                                            "role": "assistant",
+                                            "status": "completed",
+                                            "content": [
+                                                {
+                                                    "type": "output_text",
+                                                    "text": text_buffer,
+                                                    "annotations": [],
+                                                }
+                                            ],
+                                        },
+                                    },
+                                )
                                 text_started = False  # prevent double-close
 
                             tc["output_index"] = tool_output_index
                             tool_output_index += 1
-                            yield _sse("response.output_item.added", {
-                                "type": "response.output_item.added",
-                                "output_index": tc["output_index"],
-                                "item": {
-                                    "type": "function_call",
-                                    "id": tc["id"],
-                                    "call_id": tc["call_id"],
-                                    "name": tc["name"],
-                                    "arguments": "",
-                                    "status": "in_progress",
+                            yield _sse(
+                                "response.output_item.added",
+                                {
+                                    "type": "response.output_item.added",
+                                    "output_index": tc["output_index"],
+                                    "item": {
+                                        "type": "function_call",
+                                        "id": tc["id"],
+                                        "call_id": tc["call_id"],
+                                        "name": tc["name"],
+                                        "arguments": "",
+                                        "status": "in_progress",
+                                    },
                                 },
-                            })
+                            )
 
                         # Arguments delta
                         if fn.get("arguments") and tc["started"]:
                             tc["arguments"] += fn["arguments"]
-                            yield _sse("response.function_call_arguments.delta", {
-                                "type": "response.function_call_arguments.delta",
-                                "item_id": tc["id"],
-                                "output_index": tc["output_index"],
-                                "delta": fn["arguments"],
-                            })
+                            yield _sse(
+                                "response.function_call_arguments.delta",
+                                {
+                                    "type": "response.function_call_arguments.delta",
+                                    "item_id": tc["id"],
+                                    "output_index": tc["output_index"],
+                                    "delta": fn["arguments"],
+                                },
+                            )
 
     except HTTPException as e:
         if e.status_code == 499:
@@ -460,80 +513,99 @@ async def stream_responses_from_chat_completions(
     # --- Finalize ---
     # Close text output item if still open
     if text_started:
-        yield _sse("response.content_part.done", {
-            "type": "response.content_part.done",
-            "item_id": msg_id,
-            "output_index": text_content_index,
-            "content_index": 0,
-            "part": {"type": "output_text", "text": text_buffer, "annotations": []},
-        })
-        yield _sse("response.output_item.done", {
-            "type": "response.output_item.done",
-            "output_index": text_content_index,
-            "item": {
+        yield _sse(
+            "response.content_part.done",
+            {
+                "type": "response.content_part.done",
+                "item_id": msg_id,
+                "output_index": text_content_index,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": text_buffer, "annotations": []},
+            },
+        )
+        yield _sse(
+            "response.output_item.done",
+            {
+                "type": "response.output_item.done",
+                "output_index": text_content_index,
+                "item": {
+                    "type": "message",
+                    "id": msg_id,
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "text": text_buffer, "annotations": []}],
+                },
+            },
+        )
+
+    # Close any open tool call items
+    for tc in tool_calls.values():
+        if tc["started"]:
+            yield _sse(
+                "response.function_call_arguments.done",
+                {
+                    "type": "response.function_call_arguments.done",
+                    "item_id": tc["id"],
+                    "output_index": tc["output_index"],
+                    "arguments": tc["arguments"],
+                },
+            )
+            yield _sse(
+                "response.output_item.done",
+                {
+                    "type": "response.output_item.done",
+                    "output_index": tc["output_index"],
+                    "item": {
+                        "type": "function_call",
+                        "id": tc["id"],
+                        "call_id": tc["call_id"],
+                        "name": tc["name"],
+                        "arguments": tc["arguments"],
+                        "status": "completed",
+                    },
+                },
+            )
+
+    # Build final output array for the completed event
+    final_output: list[dict] = []
+    if text_buffer:
+        final_output.append(
+            {
                 "type": "message",
                 "id": msg_id,
                 "role": "assistant",
                 "status": "completed",
                 "content": [{"type": "output_text", "text": text_buffer, "annotations": []}],
-            },
-        })
-
-    # Close any open tool call items
+            }
+        )
     for tc in tool_calls.values():
         if tc["started"]:
-            yield _sse("response.function_call_arguments.done", {
-                "type": "response.function_call_arguments.done",
-                "item_id": tc["id"],
-                "output_index": tc["output_index"],
-                "arguments": tc["arguments"],
-            })
-            yield _sse("response.output_item.done", {
-                "type": "response.output_item.done",
-                "output_index": tc["output_index"],
-                "item": {
+            final_output.append(
+                {
                     "type": "function_call",
                     "id": tc["id"],
                     "call_id": tc["call_id"],
                     "name": tc["name"],
                     "arguments": tc["arguments"],
                     "status": "completed",
-                },
-            })
-
-    # Build final output array for the completed event
-    final_output: list[dict] = []
-    if text_buffer:
-        final_output.append({
-            "type": "message",
-            "id": msg_id,
-            "role": "assistant",
-            "status": "completed",
-            "content": [{"type": "output_text", "text": text_buffer, "annotations": []}],
-        })
-    for tc in tool_calls.values():
-        if tc["started"]:
-            final_output.append({
-                "type": "function_call",
-                "id": tc["id"],
-                "call_id": tc["call_id"],
-                "name": tc["name"],
-                "arguments": tc["arguments"],
-                "status": "completed",
-            })
+                }
+            )
 
     # response.completed
-    yield _sse("response.completed", {
-        "type": "response.completed",
-        "response": {
-            "id": response_id,
-            "object": "response",
-            "status": "completed",
-            "model": model,
-            "output": final_output,
-            "usage": final_usage,
+    yield _sse(
+        "response.completed",
+        {
+            "type": "response.completed",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "status": "completed",
+                "model": model,
+                "output": final_output,
+                "usage": final_usage,
+            },
         },
-    })
+    )
 
 
 def _sse(event: str, data: dict) -> str:
