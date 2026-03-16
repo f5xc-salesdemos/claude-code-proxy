@@ -3,14 +3,55 @@
 import os
 import signal
 import sys
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any, Optional
 
+import httpx
 import uvicorn
 from fastapi import FastAPI
 from src.api.endpoints import router as api_router
+from src.core.client import OpenAIClient
 from src.core.config import config
+from src.core.model_manager import ModelManager
+from src.services.searxng import SearXNGClient
 
-app = FastAPI(title="Claude-to-OpenAI API Proxy", version="1.0.0")
+
+# ---------------------------------------------------------------------------
+# Lifespan — create/destroy singletons
+# ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Create shared singletons at startup, tear them down at shutdown."""
+    custom_headers = config.get_custom_headers()
+
+    app.state.config = config
+    app.state.model_manager = ModelManager(config)
+    app.state.openai_client = OpenAIClient(
+        config.openai_api_key,
+        config.openai_base_url,
+        config.request_timeout,
+        api_version=config.azure_api_version,
+        custom_headers=custom_headers,
+    )
+    app.state.searxng_client = SearXNGClient(config.searxng_url)
+    app.state.httpx_client = httpx.AsyncClient(timeout=config.request_timeout)
+    app.state.custom_headers = custom_headers
+
+    yield
+
+    # Cleanup
+    await app.state.httpx_client.aclose()
+    await app.state.searxng_client.close()
+
+
+app = FastAPI(
+    title="Claude-to-OpenAI API Proxy",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 app.include_router(api_router)
 
 # ---------------------------------------------------------------------------
