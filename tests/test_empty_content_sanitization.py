@@ -10,7 +10,6 @@ These tests verify that the proxy:
 2. Strips known placeholder strings from incoming request history (Fix B / C)
 """
 
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,71 +22,21 @@ from src.conversion.response_converter import (
     convert_openai_streaming_to_claude_with_cancellation,
     convert_openai_to_claude_response,
 )
-from src.models.claude import ClaudeMessage, ClaudeMessagesRequest
+from src.models.claude import ClaudeMessage
+from tests.conftest import (
+    collect_streaming_events,
+    fake_openai_stream,
+    make_request,
+    openai_response,
+    parse_sse_events,
+)
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Constants
 # ---------------------------------------------------------------------------
 
 LITELLM_PLACEHOLDER = "[System: Empty message content sanitised to satisfy protocol]"
 NO_CONTENT_PLACEHOLDER = "[no content]"
-
-
-def _make_request(**overrides) -> ClaudeMessagesRequest:
-    """Build a minimal ClaudeMessagesRequest for testing."""
-    defaults = {
-        "model": "claude-3-5-sonnet-20241022",
-        "max_tokens": 1024,
-        "messages": [{"role": "user", "content": "hello"}],
-    }
-    defaults.update(overrides)
-    return ClaudeMessagesRequest(**defaults)
-
-
-def _openai_response(content=None, tool_calls=None, finish_reason="stop"):
-    """Build a minimal OpenAI non-streaming response dict."""
-    message = {}
-    if content is not None:
-        message["content"] = content
-    if tool_calls is not None:
-        message["tool_calls"] = tool_calls
-    return {
-        "id": "chatcmpl-test",
-        "choices": [{"message": message, "finish_reason": finish_reason}],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-    }
-
-
-async def _collect_streaming_events(async_gen):
-    """Collect all SSE events from the streaming generator."""
-    events = []
-    async for event in async_gen:
-        events.append(event)
-    return events
-
-
-def _parse_sse_events(raw_events):
-    """Parse raw SSE strings into (event_type, data_dict) tuples."""
-    parsed = []
-    for raw in raw_events:
-        lines = raw.strip().split("\n")
-        event_type = None
-        data = None
-        for line in lines:
-            if line.startswith("event: "):
-                event_type = line[7:]
-            elif line.startswith("data: "):
-                data = json.loads(line[6:])
-        if event_type and data:
-            parsed.append((event_type, data))
-    return parsed
-
-
-async def _fake_openai_stream(chunks):
-    """Yield SSE-formatted lines from a list of chunk dicts."""
-    for chunk in chunks:
-        yield f"data: {json.dumps(chunk)}"
-    yield "data: [DONE]"
 
 
 # ===========================================================================
@@ -119,15 +68,15 @@ class TestStreamingEmptyContentFiltering:
                 ]
             },
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude(
-                _fake_openai_stream(chunks), request, logger
+                fake_openai_stream(chunks), request, logger
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         # Should not have any content_block_start for text
         text_block_starts = [
@@ -146,15 +95,15 @@ class TestStreamingEmptyContentFiltering:
             {"choices": [{"delta": {"content": "hello"}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude(
-                _fake_openai_stream(chunks), request, logger
+                fake_openai_stream(chunks), request, logger
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         text_deltas = [
             d
@@ -173,15 +122,15 @@ class TestStreamingEmptyContentFiltering:
             {"choices": [{"delta": {"content": None}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude(
-                _fake_openai_stream(chunks), request, logger
+                fake_openai_stream(chunks), request, logger
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         text_events = [
             (et, d)
@@ -203,15 +152,15 @@ class TestStreamingEmptyContentFiltering:
             {"choices": [{"delta": {"content": "Hi"}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude(
-                _fake_openai_stream(chunks), request, logger
+                fake_openai_stream(chunks), request, logger
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         text_deltas = [
             d["delta"]["text"]
@@ -264,15 +213,15 @@ class TestStreamingEmptyContentFiltering:
             },
             {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude(
-                _fake_openai_stream(chunks), request, logger
+                fake_openai_stream(chunks), request, logger
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         text_block_starts = [
             d
@@ -294,7 +243,7 @@ class TestStreamingWithCancellationEmptyContent:
             {"choices": [{"delta": {"content": "world"}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
 
         # Mock the http_request with is_disconnected returning False
@@ -302,9 +251,9 @@ class TestStreamingWithCancellationEmptyContent:
         http_request.is_disconnected = AsyncMock(return_value=False)
         openai_client = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude_with_cancellation(
-                _fake_openai_stream(chunks),
+                fake_openai_stream(chunks),
                 request,
                 logger,
                 http_request,
@@ -312,7 +261,7 @@ class TestStreamingWithCancellationEmptyContent:
                 "req-123",
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         text_deltas = [
             d["delta"]["text"]
@@ -329,15 +278,15 @@ class TestStreamingWithCancellationEmptyContent:
             {"choices": [{"delta": {"content": ""}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
         http_request = AsyncMock()
         http_request.is_disconnected = AsyncMock(return_value=False)
         openai_client = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude_with_cancellation(
-                _fake_openai_stream(chunks),
+                fake_openai_stream(chunks),
                 request,
                 logger,
                 http_request,
@@ -345,7 +294,7 @@ class TestStreamingWithCancellationEmptyContent:
                 "req-456",
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         text_blocks = [
             d
@@ -465,7 +414,7 @@ class TestNonStreamingEmptyContent:
 
     def test_empty_string_content_with_tool_calls(self):
         """Empty string content should be omitted when tool calls exist."""
-        openai_resp = _openai_response(
+        openai_resp = openai_response(
             content="",
             tool_calls=[
                 {
@@ -479,7 +428,7 @@ class TestNonStreamingEmptyContent:
             ],
             finish_reason="tool_calls",
         )
-        request = _make_request()
+        request = make_request()
         result = convert_openai_to_claude_response(openai_resp, request)
 
         # Should have tool_use block but no text block
@@ -490,7 +439,7 @@ class TestNonStreamingEmptyContent:
 
     def test_whitespace_only_content_with_tool_calls(self):
         """Whitespace-only content should be omitted when tool calls exist."""
-        openai_resp = _openai_response(
+        openai_resp = openai_response(
             content="   \n  ",
             tool_calls=[
                 {
@@ -504,7 +453,7 @@ class TestNonStreamingEmptyContent:
             ],
             finish_reason="tool_calls",
         )
-        request = _make_request()
+        request = make_request()
         result = convert_openai_to_claude_response(openai_resp, request)
 
         text_blocks = [b for b in result["content"] if b["type"] == "text"]
@@ -512,8 +461,8 @@ class TestNonStreamingEmptyContent:
 
     def test_real_content_still_included(self):
         """Non-empty text content should still produce a text block."""
-        openai_resp = _openai_response(content="Hello there")
-        request = _make_request()
+        openai_resp = openai_response(content="Hello there")
+        request = make_request()
         result = convert_openai_to_claude_response(openai_resp, request)
 
         text_blocks = [b for b in result["content"] if b["type"] == "text"]
@@ -522,8 +471,8 @@ class TestNonStreamingEmptyContent:
 
     def test_none_content_no_tool_calls_gets_placeholder(self):
         """None content with no tool calls should still get the fallback."""
-        openai_resp = _openai_response(content=None, tool_calls=None)
-        request = _make_request()
+        openai_resp = openai_response(content=None, tool_calls=None)
+        request = make_request()
         result = convert_openai_to_claude_response(openai_resp, request)
 
         # Should have the [no content] fallback
@@ -585,15 +534,15 @@ class TestFullRoundTrip:
             },
             {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude(
-                _fake_openai_stream(chunks), request, logger
+                fake_openai_stream(chunks), request, logger
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         # Extract any text content that was emitted
         text_deltas = [
@@ -648,15 +597,15 @@ class TestStreamingWhitespaceOnlyDelta:
             {"choices": [{"delta": {"content": "   "}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude(
-                _fake_openai_stream(chunks), request, logger
+                fake_openai_stream(chunks), request, logger
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         text_block_starts = [
             (et, d)
@@ -675,15 +624,15 @@ class TestStreamingWhitespaceOnlyDelta:
             {"choices": [{"delta": {"content": "hello"}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
         http_request = AsyncMock()
         http_request.is_disconnected = AsyncMock(return_value=False)
         openai_client = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude_with_cancellation(
-                _fake_openai_stream(chunks),
+                fake_openai_stream(chunks),
                 request,
                 logger,
                 http_request,
@@ -691,7 +640,7 @@ class TestStreamingWhitespaceOnlyDelta:
                 "req-ws-1",
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         text_deltas = [
             d["delta"]["text"]
@@ -713,8 +662,8 @@ class TestNonStreamingEmptyNoToolCalls:
 
     def test_empty_string_no_tool_calls_gets_placeholder(self):
         """Empty string content with no tool calls → [no content] fallback."""
-        openai_resp = _openai_response(content="", tool_calls=None)
-        request = _make_request()
+        openai_resp = openai_response(content="", tool_calls=None)
+        request = make_request()
         result = convert_openai_to_claude_response(openai_resp, request)
 
         # Should have the [no content] fallback since no text and no tool calls
@@ -724,8 +673,8 @@ class TestNonStreamingEmptyNoToolCalls:
 
     def test_whitespace_only_no_tool_calls_gets_placeholder(self):
         """Whitespace-only content with no tool calls → [no content] fallback."""
-        openai_resp = _openai_response(content="  \n  ", tool_calls=None)
-        request = _make_request()
+        openai_resp = openai_response(content="  \n  ", tool_calls=None)
+        request = make_request()
         result = convert_openai_to_claude_response(openai_resp, request)
 
         assert len(result["content"]) == 1
@@ -748,15 +697,15 @@ class TestCancellationVariantParity:
             {"choices": [{"delta": {"content": None}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
         http_request = AsyncMock()
         http_request.is_disconnected = AsyncMock(return_value=False)
         openai_client = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude_with_cancellation(
-                _fake_openai_stream(chunks),
+                fake_openai_stream(chunks),
                 request,
                 logger,
                 http_request,
@@ -764,7 +713,7 @@ class TestCancellationVariantParity:
                 "req-none-1",
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         text_events = [
             (et, d)
@@ -786,15 +735,15 @@ class TestCancellationVariantParity:
             {"choices": [{"delta": {"content": "Hi"}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
         http_request = AsyncMock()
         http_request.is_disconnected = AsyncMock(return_value=False)
         openai_client = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude_with_cancellation(
-                _fake_openai_stream(chunks),
+                fake_openai_stream(chunks),
                 request,
                 logger,
                 http_request,
@@ -802,7 +751,7 @@ class TestCancellationVariantParity:
                 "req-real-1",
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         text_deltas = [
             d["delta"]["text"]
@@ -855,15 +804,15 @@ class TestCancellationVariantParity:
             },
             {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
         ]
-        request = _make_request()
+        request = make_request()
         logger = MagicMock()
         http_request = AsyncMock()
         http_request.is_disconnected = AsyncMock(return_value=False)
         openai_client = MagicMock()
 
-        events = await _collect_streaming_events(
+        events = await collect_streaming_events(
             convert_openai_streaming_to_claude_with_cancellation(
-                _fake_openai_stream(chunks),
+                fake_openai_stream(chunks),
                 request,
                 logger,
                 http_request,
@@ -871,7 +820,7 @@ class TestCancellationVariantParity:
                 "req-tool-1",
             )
         )
-        parsed = _parse_sse_events(events)
+        parsed = parse_sse_events(events)
 
         text_block_starts = [
             d

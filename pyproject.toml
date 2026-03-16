@@ -51,6 +51,14 @@ dev = [
     "ruff==0.15.0",
 ]
 
+[tool.black]
+line-length = 88
+target-version = ['py313']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
