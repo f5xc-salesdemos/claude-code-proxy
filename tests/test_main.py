@@ -9,9 +9,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
-@pytest.mark.asyncio
-@pytest.mark.integration
+
 async def test_basic_chat():
     """Test basic chat completion."""
     async with httpx.AsyncClient() as client:
@@ -28,8 +28,6 @@ async def test_basic_chat():
         print(json.dumps(response.json(), indent=2))
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_streaming_chat():
     """Test streaming chat completion."""
     async with httpx.AsyncClient() as client:
@@ -49,8 +47,6 @@ async def test_streaming_chat():
                     print(line)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_function_calling():
     """Test function calling capability."""
     async with httpx.AsyncClient() as client:
@@ -94,8 +90,6 @@ async def test_function_calling():
         print(json.dumps(response.json(), indent=2))
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_with_system_message():
     """Test with system message."""
     async with httpx.AsyncClient() as client:
@@ -113,8 +107,6 @@ async def test_with_system_message():
         print(json.dumps(response.json(), indent=2))
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_multimodal():
     """Test multimodal input (text + image)."""
     async with httpx.AsyncClient() as client:
@@ -149,8 +141,6 @@ async def test_multimodal():
         print(json.dumps(response.json(), indent=2))
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_conversation_with_tool_use():
     """Test a complete conversation with tool use and results."""
     async with httpx.AsyncClient() as client:
@@ -227,8 +217,6 @@ async def test_conversation_with_tool_use():
                 print(json.dumps(response2.json(), indent=2))
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_token_counting():
     """Test token counting endpoint."""
     async with httpx.AsyncClient() as client:
@@ -249,8 +237,6 @@ async def test_token_counting():
         print(json.dumps(response.json(), indent=2))
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_health_and_connection():
     """Test health and connection endpoints."""
     async with httpx.AsyncClient() as client:
