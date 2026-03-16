@@ -12,6 +12,7 @@ from typing import Any, Optional
 import httpx
 import uvicorn
 from fastapi import FastAPI
+
 from src.api.endpoints import router as api_router
 from src.core.client import OpenAIClient
 from src.core.config import config
@@ -27,9 +28,7 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-async def _refresh_registry_loop(
-    registry: ModelRegistry, interval: int
-) -> None:
+async def _refresh_registry_loop(registry: ModelRegistry, interval: int) -> None:
     """Periodically refresh model limits from the upstream server."""
     while True:
         await asyncio.sleep(interval)

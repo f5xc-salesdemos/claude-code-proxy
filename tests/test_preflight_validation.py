@@ -1,8 +1,7 @@
 """Unit tests for pre-flight context window validation in endpoints.py."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 from fastapi.testclient import TestClient
 
 from src.core.model_registry import ModelLimits
@@ -29,6 +28,7 @@ class TestPreflightValidation:
         monkeypatch.setattr(ep, "estimate_tokens", lambda *a, **kw: 950)
         monkeypatch.setattr(ep.config, "model_registry_enabled", True)
         monkeypatch.setattr(ep.config, "model_registry_safety_margin", 0.95)
+        monkeypatch.setattr(ep.config, "anthropic_api_key", None)
 
         # 950 + 200 = 1150 > 1000 * 0.95 = 950 → reject
         from src.main import app
@@ -59,6 +59,7 @@ class TestPreflightValidation:
         monkeypatch.setattr(ep, "model_registry", mock_registry)
         monkeypatch.setattr(ep.config, "model_registry_enabled", True)
         monkeypatch.setattr(ep.config, "model_registry_safety_margin", 0.95)
+        monkeypatch.setattr(ep.config, "anthropic_api_key", None)
 
         from src.main import app
 
@@ -86,6 +87,7 @@ class TestPreflightValidation:
         monkeypatch.setattr(ep.config, "model_registry_enabled", False)
         monkeypatch.setattr(ep.config, "model_registry_safety_margin", 0.95)
         monkeypatch.setattr(ep, "estimate_tokens", lambda *a, **kw: 999_999)
+        monkeypatch.setattr(ep.config, "anthropic_api_key", None)
 
         from src.main import app
 
@@ -111,6 +113,7 @@ class TestPreflightValidation:
         monkeypatch.setattr(ep, "estimate_tokens", lambda *a, **kw: 10)
         monkeypatch.setattr(ep.config, "model_registry_enabled", True)
         monkeypatch.setattr(ep.config, "model_registry_safety_margin", 0.95)
+        monkeypatch.setattr(ep.config, "anthropic_api_key", None)
 
         from src.main import app
 

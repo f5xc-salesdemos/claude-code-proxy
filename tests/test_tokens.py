@@ -2,10 +2,9 @@
 
 import json
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from src.core.tokens import estimate_tokens
-
 
 # ---------------------------------------------------------------------------
 # Helpers: lightweight stand-ins for Pydantic models
@@ -39,9 +38,13 @@ def _sys_block(text: str) -> SimpleNamespace:
     return SimpleNamespace(type="text", text=text)
 
 
-def _tool(name: str, description: Optional[str], input_schema: Dict[str, Any]) -> SimpleNamespace:
+def _tool(
+    name: str, description: Optional[str], input_schema: Dict[str, Any]
+) -> SimpleNamespace:
     """Build a tool definition object."""
-    return SimpleNamespace(name=name, description=description, input_schema=input_schema)
+    return SimpleNamespace(
+        name=name, description=description, input_schema=input_schema
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +150,7 @@ def test_system_and_tools_counted():
     """System text and tool definitions are included in the estimate."""
     system_text = "a" * 40  # 40 chars
     tool = _tool(
-        name="t",           # 1 char
+        name="t",  # 1 char
         description=None,
         input_schema={"type": "object"},  # json → '{"type": "object"}' = 18 chars
     )
@@ -233,9 +236,9 @@ def test_multiple_tools_summed():
 
 def test_all_inputs_combined():
     """Messages + system + tools all contribute to the final estimate."""
-    msg = _msg("abcdefgh")            # 8 chars
-    system = "sys "                   # 4 chars
-    schema = {"type": "object"}       # e.g. 18 chars when serialised
+    msg = _msg("abcdefgh")  # 8 chars
+    system = "sys "  # 4 chars
+    schema = {"type": "object"}  # e.g. 18 chars when serialised
     tool = _tool(name="t", description=None, input_schema=schema)
     schema_chars = len(json.dumps(schema))
     total = 8 + 4 + 1 + schema_chars  # messages + system + name + schema

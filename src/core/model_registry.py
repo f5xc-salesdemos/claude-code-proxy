@@ -54,9 +54,9 @@ class ModelRegistry:
         output_prefix = "MODEL_MAX_OUTPUT_TOKENS_"
         for env_key, env_value in os.environ.items():
             if env_key.startswith(input_prefix):
-                model_key = env_key[len(input_prefix):].lower().replace("_", "-")
+                model_key = env_key[len(input_prefix) :].lower().replace("_", "-")
             elif env_key.startswith(output_prefix):
-                model_key = env_key[len(output_prefix):].lower().replace("_", "-")
+                model_key = env_key[len(output_prefix) :].lower().replace("_", "-")
             else:
                 continue
 
@@ -69,9 +69,13 @@ class ModelRegistry:
             if model_key in self._limits:
                 existing = self._limits[model_key]
                 if env_key.startswith(input_prefix):
-                    self._limits[model_key] = ModelLimits(value, existing.max_output_tokens)
+                    self._limits[model_key] = ModelLimits(
+                        value, existing.max_output_tokens
+                    )
                 else:
-                    self._limits[model_key] = ModelLimits(existing.max_input_tokens, value)
+                    self._limits[model_key] = ModelLimits(
+                        existing.max_input_tokens, value
+                    )
             else:
                 if env_key.startswith(input_prefix):
                     self._limits[model_key] = ModelLimits(value, _FALLBACK_OUTPUT)
@@ -131,9 +135,7 @@ class ModelRegistry:
                     existing = self._limits.get(model_group)
                     max_output = existing.max_output_tokens if existing else 0
 
-                self._limits[model_group] = ModelLimits(
-                    int(max_input), int(max_output)
-                )
+                self._limits[model_group] = ModelLimits(int(max_input), int(max_output))
 
             # Re-apply env overrides so they remain highest priority after discovery
             self._apply_env_overrides()

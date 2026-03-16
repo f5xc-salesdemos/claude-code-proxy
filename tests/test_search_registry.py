@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Optional
 
 import pytest
+
 from src.services.search.base import SearchProvider
 from src.services.search.registry import (
     _registry,

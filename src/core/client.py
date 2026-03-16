@@ -14,6 +14,7 @@ from openai._exceptions import (
     BadRequestError,
     RateLimitError,
 )
+
 from src.core.config import config
 
 logger = logging.getLogger(__name__)

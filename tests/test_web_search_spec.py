@@ -11,6 +11,7 @@ Covers:
 import logging
 
 import pytest
+
 from src.api.endpoints import _build_non_streaming_web_search_response
 from src.conversion.response_converter import convert_openai_streaming_to_claude
 from tests.conftest import (

@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, Dict, Optional
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+
 from src.conversion.request_converter import convert_claude_to_openai
 from src.conversion.response_converter import (
     _generate_server_tool_id,
@@ -278,7 +279,11 @@ async def create_message(
         )
 
         # Pre-flight context window check
-        if config.model_registry_enabled and model_registry is not None and request.model is not None:
+        if (
+            config.model_registry_enabled
+            and model_registry is not None
+            and request.model is not None
+        ):
             _limits = model_registry.get_limits(request.model)
             if _limits is not None:
                 _estimated_input = estimate_tokens(
@@ -554,7 +559,7 @@ async def list_models(_: None = Depends(validate_openai_api_key)) -> Any:
                     ("claude-haiku", config.small_model),
                 ]
                 for alias_id, mapped_model in _aliases:
-                    if alias_id in existing_ids:
+                    if alias_id in existing_ids or mapped_model is None:
                         continue
                     limits = model_registry.get_limits(mapped_model)
                     entry: Dict[str, Any] = {

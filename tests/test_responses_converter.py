@@ -1,6 +1,7 @@
 """Unit tests for the Responses API → Chat Completions translation layer."""
 
 import pytest
+
 from src.conversion.responses_converter import (
     build_response_object,
     convert_responses_to_chat_completions,

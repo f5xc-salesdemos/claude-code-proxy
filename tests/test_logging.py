@@ -39,6 +39,7 @@ class TestCorrelationIdMiddleware:
     def _make_app(self):
         """Create a minimal FastAPI app with the middleware."""
         from fastapi import FastAPI, Request
+
         from src.middleware import CorrelationIdMiddleware
 
         app = FastAPI()

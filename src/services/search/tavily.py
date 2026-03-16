@@ -9,6 +9,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 import httpx
+
 from src.services.search.base import SearchProvider
 from src.services.search.registry import register_provider
 

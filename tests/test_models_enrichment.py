@@ -1,8 +1,9 @@
 """Unit tests for /v1/models enrichment with Claude aliases and context_window."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 from src.core.model_registry import ModelLimits
 
 
@@ -41,6 +42,7 @@ class TestModelsEnrichment:
         monkeypatch.setattr(ep, "_get_httpx_client", lambda: mock_client)
 
         from fastapi.testclient import TestClient
+
         from src.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -80,6 +82,7 @@ class TestModelsEnrichment:
         monkeypatch.setattr(ep, "_get_httpx_client", lambda: mock_client)
 
         from fastapi.testclient import TestClient
+
         from src.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -110,6 +113,7 @@ class TestModelsEnrichment:
         monkeypatch.setattr(ep, "_get_httpx_client", lambda: mock_client)
 
         from fastapi.testclient import TestClient
+
         from src.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -133,7 +137,12 @@ class TestModelsEnrichment:
         upstream_body = {
             "object": "list",
             "data": [
-                {"id": "claude-opus", "object": "model", "created": 0, "owned_by": "upstream"},
+                {
+                    "id": "claude-opus",
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "upstream",
+                },
                 {"id": "gpt-4o", "object": "model", "created": 0, "owned_by": "openai"},
             ],
         }
@@ -146,6 +155,7 @@ class TestModelsEnrichment:
         monkeypatch.setattr(ep, "_get_httpx_client", lambda: mock_client)
 
         from fastapi.testclient import TestClient
+
         from src.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
