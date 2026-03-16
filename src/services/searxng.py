@@ -34,7 +34,7 @@ class SearXNGClient:
         try:
             resp = await self._client.get(self.base_url, timeout=3.0)
             self._available = resp.status_code < 500
-        except Exception:  # pylint: disable=broad-exception-caught
+        except (httpx.HTTPError, httpx.TimeoutException, OSError):
             self._available = False
         self._available_checked_at = now
         return self._available
@@ -65,8 +65,8 @@ class SearXNGClient:
                     result["page_age"] = str(page_age)
                 results.append(result)
             return {"results": results}
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning(f"SearXNG search failed: {e}")
+        except (httpx.HTTPError, httpx.TimeoutException, OSError) as e:
+            logger.warning("SearXNG search failed: %s", e)
             return {
                 "error": {
                     "type": WEB_SEARCH_TOOL_RESULT_ERROR_TYPE,
