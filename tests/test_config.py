@@ -138,3 +138,29 @@ class TestCustomHeaders:
                 monkeypatch.delenv(key, raising=False)
         cfg = Config()
         assert cfg.get_custom_headers() == {}
+
+
+class TestModelRegistryConfig:
+    """model_registry_* fields defaults and env var overrides."""
+
+    def test_model_registry_defaults(self, monkeypatch):
+        """Verify default values for all model registry fields."""
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        monkeypatch.delenv("MODEL_REGISTRY_ENABLED", raising=False)
+        monkeypatch.delenv("MODEL_REGISTRY_REFRESH_INTERVAL", raising=False)
+        monkeypatch.delenv("MODEL_REGISTRY_SAFETY_MARGIN", raising=False)
+        cfg = Config()
+        assert cfg.model_registry_enabled is True
+        assert cfg.model_registry_refresh_interval == 300
+        assert cfg.model_registry_safety_margin == 0.95
+
+    def test_model_registry_env_override(self, monkeypatch):
+        """Env vars override each model registry field."""
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        monkeypatch.setenv("MODEL_REGISTRY_ENABLED", "false")
+        monkeypatch.setenv("MODEL_REGISTRY_REFRESH_INTERVAL", "600")
+        monkeypatch.setenv("MODEL_REGISTRY_SAFETY_MARGIN", "0.8")
+        cfg = Config()
+        assert cfg.model_registry_enabled is False
+        assert cfg.model_registry_refresh_interval == 600
+        assert cfg.model_registry_safety_margin == 0.8

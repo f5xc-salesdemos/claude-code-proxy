@@ -49,6 +49,11 @@ class Config(BaseSettings):
     middle_model: Optional[str] = None
     small_model: str = "gpt-4o-mini"
 
+    # Model registry
+    model_registry_enabled: bool = True
+    model_registry_refresh_interval: int = 300
+    model_registry_safety_margin: float = 0.95
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, v: str) -> str:
