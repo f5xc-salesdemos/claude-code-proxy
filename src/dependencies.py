@@ -6,13 +6,13 @@ app instance so that endpoint handlers never reference module-level
 globals.
 """
 
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 from fastapi import Request
 from src.core.client import OpenAIClient
 from src.core.config import Config
-from src.services.searxng import SearXNGClient
+from src.services.search.base import SearchProvider
 
 
 def get_config(request: Request) -> Config:
@@ -30,9 +30,9 @@ def get_model_manager(request: Request) -> Any:
     return request.app.state.model_manager
 
 
-def get_searxng_client(request: Request) -> SearXNGClient:
-    """Return the SearXNG client singleton from app.state."""
-    return request.app.state.searxng_client  # type: ignore[no-any-return]
+def get_search_provider(request: Request) -> Optional[SearchProvider]:
+    """Return the search provider singleton from app.state (may be None)."""
+    return getattr(request.app.state, "search_provider", None)
 
 
 def get_httpx_client(request: Request) -> httpx.AsyncClient:

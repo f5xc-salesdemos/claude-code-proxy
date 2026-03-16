@@ -27,7 +27,7 @@ from src.core.config import config
 from src.core.logging import logger
 from src.core.model_manager import ModelManager
 from src.models.claude import ClaudeMessagesRequest, ClaudeTokenCountRequest
-from src.services.searxng import SearXNGClient
+from src.services.search.base import SearchProvider
 
 router = APIRouter()
 
@@ -52,8 +52,8 @@ openai_client = OpenAIClient(
 # Model manager
 model_manager = ModelManager(config)
 
-# SearXNG client for WebSearch interception
-searxng_client = SearXNGClient(config.searxng_url)
+# Search provider for WebSearch interception (set during lifespan)
+search_provider: Optional[SearchProvider] = None
 
 # Shared httpx client for pass-through requests
 _httpx_client: Optional[httpx.AsyncClient] = None  # pylint: disable=invalid-name
@@ -133,14 +133,16 @@ async def _strip_web_search_if_unavailable(
     openai_request: Dict[str, Any],
     web_search_config: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    """Remove the web_search tool from the request if SearXNG is down.
+    """Remove the web_search tool from the request if no provider is available.
 
     Returns the (possibly cleared) web_search_config.
     """
-    if not web_search_config or await searxng_client.is_available():
+    if not web_search_config:
+        return web_search_config
+    if search_provider is not None and await search_provider.is_available():
         return web_search_config
 
-    logger.info("SearXNG not available, stripping web_search tool")
+    logger.info("Search provider not available, stripping web_search tool")
     if "tools" in openai_request:
         openai_request["tools"] = [
             t
@@ -189,7 +191,7 @@ def _create_streaming_response(
             openai_client,
             request_id,
             web_search_config=web_search_config,
-            searxng_client=searxng_client if web_search_config else None,
+            search_provider=search_provider if web_search_config else None,
         ),
         media_type="text/event-stream",
         headers=STREAMING_RESPONSE_HEADERS,
@@ -207,13 +209,16 @@ async def _create_non_streaming_response(
         openai_request, request_id
     )
 
-    if web_search_config:
+    if web_search_config and search_provider is not None:
         tool_calls = (
             openai_response.get("choices", [{}])[0]
             .get("message", {})
             .get("tool_calls", [])
             or []
         )
+
+        # Accumulate ALL web_search queries from tool_calls
+        web_search_queries: list[str] = []
         for tc in tool_calls:
             func = tc.get("function", {})
             if func.get("name") == "web_search":
@@ -223,10 +228,26 @@ async def _create_non_streaming_response(
                 except json.JSONDecodeError:
                     query = ""
                 if query:
-                    search_result = await searxng_client.search(query)
-                    return _build_non_streaming_web_search_response(
-                        openai_response, request, query, search_result
-                    )
+                    web_search_queries.append(query)
+
+        if web_search_queries:
+            # Extract domain filters from web_search_config
+            allowed_domains = web_search_config.get("allowed_domains")
+            blocked_domains = web_search_config.get("blocked_domains")
+
+            # Execute all searches
+            search_results: list[tuple[str, dict]] = []
+            for query in web_search_queries:
+                result = await search_provider.search(
+                    query,
+                    allowed_domains=allowed_domains or None,
+                    blocked_domains=blocked_domains or None,
+                )
+                search_results.append((query, result))
+
+            return _build_non_streaming_web_search_response(
+                openai_response, request, search_results
+            )
 
     return convert_openai_to_claude_response(openai_response, request)
 
@@ -277,47 +298,55 @@ async def create_message(
 def _build_non_streaming_web_search_response(
     openai_response: dict,
     original_request: ClaudeMessagesRequest,
-    query: str,
-    search_result: dict,
+    search_results: list[tuple[str, dict]],
 ) -> dict:
-    """Build a Claude response with web_search server_tool_use + result for non-streaming."""
-    message = openai_response.get("choices", [{}])[0].get("message", {})
-    content_blocks = []
+    """Build a Claude response with web_search server_tool_use + result for non-streaming.
 
-    # Add text content if present
+    ``search_results`` is a list of ``(query, search_result_dict)`` tuples —
+    one per web_search call that was executed.
+
+    Per the Anthropic spec, the content block order is:
+    1. server_tool_use / web_search_tool_result pairs (one per search)
+    2. text block (the synthesized answer)
+    """
+    message = openai_response.get("choices", [{}])[0].get("message", {})
+    content_blocks: list[dict] = []
+
+    # Add server_tool_use + web_search_tool_result pairs first
+    for query, search_result in search_results:
+        server_tool_id = _generate_server_tool_id()
+
+        content_blocks.append(
+            {
+                "type": "server_tool_use",
+                "id": server_tool_id,
+                "name": "web_search",
+                "input": {"query": query},
+            }
+        )
+
+        if "error" in search_result:
+            result_content = search_result["error"]
+        else:
+            result_content = search_result.get("results", [])
+
+        content_blocks.append(
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": server_tool_id,
+                "content": result_content,
+            }
+        )
+
+    # Add text content last (after all tool blocks)
     text_content = message.get("content")
     if text_content:
         content_blocks.append({"type": "text", "text": text_content})
 
-    # Add server_tool_use block
-    server_tool_id = _generate_server_tool_id()
-    content_blocks.append(
-        {
-            "type": "server_tool_use",
-            "id": server_tool_id,
-            "name": "web_search",
-            "input": {"query": query},
-        }
-    )
-
-    # Add web_search_tool_result block
-    if "error" in search_result:
-        result_content = search_result["error"]
-    else:
-        result_content = search_result.get("results", [])
-
-    content_blocks.append(
-        {
-            "type": "web_search_tool_result",
-            "tool_use_id": server_tool_id,
-            "content": result_content,
-        }
-    )
-
     usage_data = {
         "input_tokens": openai_response.get("usage", {}).get("prompt_tokens", 0),
         "output_tokens": openai_response.get("usage", {}).get("completion_tokens", 0),
-        "server_tool_use": {"web_search_requests": 1},
+        "server_tool_use": {"web_search_requests": len(search_results)},
     }
 
     return {
@@ -523,7 +552,7 @@ async def health_check() -> Dict[str, Any]:
         "timestamp": datetime.now().isoformat(),
         "openai_api_configured": bool(config.openai_api_key),
         "client_api_key_validation": bool(config.anthropic_api_key),
-        "searxng_url": config.searxng_url,
+        "search_provider": config.search_provider,
     }
 
 
@@ -602,7 +631,7 @@ async def root() -> Dict[str, Any]:
             "client_api_key_validation": bool(config.anthropic_api_key),
             "big_model": config.big_model,
             "small_model": config.small_model,
-            "searxng_url": config.searxng_url,
+            "search_provider": config.search_provider,
         },
         "endpoints": {
             "messages": "/v1/messages",

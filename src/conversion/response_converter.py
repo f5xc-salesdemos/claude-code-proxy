@@ -9,7 +9,7 @@ from typing import Any, AsyncGenerator, Dict, Optional
 from fastapi import HTTPException, Request
 from src.core.constants import Constants
 from src.models.claude import ClaudeMessagesRequest
-from src.services.searxng import SearXNGClient
+from src.services.search.base import SearchProvider
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +48,14 @@ def convert_openai_to_claude_response(
     openai_response: Dict[str, Any],
     original_request: ClaudeMessagesRequest,
     web_search_config: Optional[Dict[str, Any]] = None,
-    searxng_client: Optional[SearXNGClient] = None,
+    search_provider: Optional[SearchProvider] = None,
 ) -> Dict[str, Any]:
     """Convert OpenAI response to Claude format.
 
     NOTE: For web_search interception in non-streaming mode the caller
     must have already executed the search and injected the results (since
     this function is synchronous).  The ``web_search_config`` and
-    ``searxng_client`` params are accepted for signature consistency but
+    ``search_provider`` params are accepted for signature consistency but
     web_search handling is done in the endpoint layer for non-streaming.
     """
 
@@ -137,7 +137,7 @@ async def convert_openai_streaming_to_claude(
     request_id: Optional[str] = None,
     *,
     web_search_config: Optional[Dict[str, Any]] = None,
-    searxng_client: Optional[SearXNGClient] = None,
+    search_provider: Optional[SearchProvider] = None,
 ) -> AsyncGenerator[str, None]:
     """Convert OpenAI streaming response to Claude streaming format.
 
@@ -339,7 +339,7 @@ async def convert_openai_streaming_to_claude(
         )
 
         # For web_search calls, execute search and emit result block
-        if tool_data.get("is_web_search") and searxng_client is not None:
+        if tool_data.get("is_web_search") and search_provider is not None:
             web_search_count += 1
             query = ""
             try:
@@ -348,8 +348,23 @@ async def convert_openai_streaming_to_claude(
             except json.JSONDecodeError:
                 query = tool_data.get("args_buffer", "").strip('"')
 
-            logger.info("Executing SearXNG search for: %s", query)
-            search_result = await searxng_client.search(query)
+            logger.info("Executing web search for: %s", query)
+            # Extract domain filters from web_search_config
+            _allowed = (
+                web_search_config.get("allowed_domains")
+                if web_search_config
+                else None
+            )
+            _blocked = (
+                web_search_config.get("blocked_domains")
+                if web_search_config
+                else None
+            )
+            search_result = await search_provider.search(
+                query,
+                allowed_domains=_allowed or None,
+                blocked_domains=_blocked or None,
+            )
 
             if "error" in search_result:
                 result_content = search_result["error"]
@@ -465,6 +480,7 @@ def _handle_tool_delta(
                             "type": Constants.CONTENT_SERVER_TOOL_USE,
                             "id": server_tool_id,
                             "name": "web_search",
+                            "input": {},
                         },
                     },
                 )
