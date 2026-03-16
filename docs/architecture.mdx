@@ -1,0 +1,93 @@
+---
+title: How It Works
+description: Request flow, model mapping, API endpoints, and supported features
+sidebar:
+  order: 3
+---
+
+## Request Flow
+
+```
+Claude Code ──► Proxy (localhost:8082) ──► Upstream OpenAI-compatible API
+     ◄──────────────  ◄──────────────────────
+```
+
+1. Claude Code sends a request to the proxy using the Anthropic API format.
+2. The proxy converts the request to the OpenAI Chat Completions format.
+3. The proxy forwards the converted request to your upstream provider.
+4. The upstream response is converted back to Anthropic format.
+5. Claude Code receives the response as if it came from the Anthropic API.
+
+## Model Mapping
+
+When Claude Code requests a Claude model, the proxy maps it to the
+configured upstream model based on the tier keyword in the model name:
+
+| Claude Model Pattern | Tier | Maps To | Default |
+| --- | --- | --- | --- |
+| Any name containing `haiku` | Small | `SMALL_MODEL` | `gpt-4o-mini` |
+| Any name containing `sonnet` | Middle | `MIDDLE_MODEL` | `gpt-4o` |
+| Any name containing `opus` | Big | `BIG_MODEL` | `gpt-4o` |
+| Unknown model names | -- | `BIG_MODEL` | `gpt-4o` |
+
+### Passthrough Prefixes
+
+Models with the following prefixes are forwarded to the upstream provider
+without remapping:
+
+- `gpt-*` -- OpenAI GPT models
+- `o1-*`, `o3-*`, `o4-*` -- OpenAI reasoning models
+- `ep-*` -- ARK/Volcano Engine models
+- `doubao-*` -- Doubao models
+- `deepseek-*` -- DeepSeek models
+
+## API Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/v1/messages` | Claude Messages API (main endpoint for Claude Code) |
+| `POST` | `/v1/messages/count_tokens` | Token count estimation |
+| `POST` | `/v1/responses`, `/responses` | OpenAI Responses API (Codex CLI) |
+| `POST` | `/v1/chat/completions`, `/chat/completions` | Chat Completions pass-through |
+| `GET` | `/v1/models`, `/models` | Models list pass-through |
+| `GET` | `/health` | Health check with configuration status |
+| `GET` | `/test-connection` | Live connectivity test to upstream API |
+| `POST` | `/admin/reload` | Trigger graceful server reload |
+
+## Supported Features
+
+- **Streaming** -- Server-sent events (SSE) for real-time responses
+- **Function calling / tool use** -- Bidirectional tool-call conversion
+- **Image inputs** -- Base64 and URL image content blocks
+- **Multi-turn conversations** -- Full message history support
+- **Token counting** -- Approximate input token estimation
+
+## Web Search (SearXNG)
+
+The proxy can intercept Claude's `web_search` tool calls and execute them
+against a local [SearXNG](https://docs.searxng.org/) instance instead of
+relying on Anthropic's server-side search.
+
+### How It Works
+
+1. Claude Code sends a request containing a `web_search` tool.
+2. The proxy checks whether the configured SearXNG instance is reachable
+   (result is cached for 60 seconds).
+3. If SearXNG is available, the proxy intercepts the tool call, queries
+   SearXNG, and returns results in Anthropic's `web_search_tool_result`
+   format.
+4. If SearXNG is **not** available, the `web_search` tool is silently
+   stripped from the request so the upstream provider does not receive an
+   unsupported tool definition.
+
+### Configuration
+
+Set the `SEARXNG_URL` environment variable to point at your SearXNG instance:
+
+```bash
+SEARXNG_URL="http://searxng:8080"
+```
+
+The default value assumes a SearXNG container named `searxng` on the same
+Docker network. See the [Configuration Reference](/claude-code-proxy/configuration/)
+for details.

@@ -1,0 +1,105 @@
+---
+title: Deployment
+description: Run the proxy in development or production with Python, Docker, or as a binary
+sidebar:
+  order: 4
+---
+
+## Python (Direct)
+
+The simplest way to run the proxy:
+
+```bash
+python start_proxy.py
+```
+
+To run in the background:
+
+```bash
+nohup python start_proxy.py &
+```
+
+## Docker
+
+A `Dockerfile` and `docker-compose.yml` are included in the repository.
+
+```bash
+# Build and start
+docker-compose up -d
+
+# View logs
+docker-compose logs -f proxy
+```
+
+The Compose file mounts your `.env` file into the container so all
+environment variables are picked up automatically. The proxy listens on
+port 8082 by default.
+
+### Dockerfile Highlights
+
+- Based on the official **uv** image (`ghcr.io/astral-sh/uv:bookworm-slim`)
+- Runs as a non-root user (`appuser`)
+- Includes a built-in health check against `/health`
+
+## Binary Packaging
+
+For environments where Python is not available, the proxy can be packaged
+as a standalone binary with PyInstaller. See the
+[Binary Packaging](/claude-code-proxy/deployment/binary/) guide for the
+full walkthrough.
+
+## Graceful Reload
+
+The proxy supports graceful restarts that finish in-flight requests before
+recycling the server -- no dropped connections.
+
+Two ways to trigger a reload:
+
+```bash
+# Send SIGHUP to the process
+kill -HUP $(pgrep -f start_proxy.py)
+
+# Or use the admin endpoint
+curl -X POST http://localhost:8082/admin/reload
+```
+
+The server prints `SIGHUP received -- reloading proxy...` and comes back
+up on the same port within a few seconds. Verify with:
+
+```bash
+curl http://localhost:8082/health
+```
+
+## Production Considerations
+
+### System Requirements
+
+| Resource | Minimum |
+| --- | --- |
+| RAM | 512 MB |
+| Storage | 100 MB |
+| Network | Access to your upstream API endpoint |
+| Privileges | No root required |
+
+### Security
+
+- **Store secrets in environment variables** -- never hard-code API keys.
+  Use an `.env` file with restricted permissions (`chmod 600 .env`).
+- **Run as a non-root user** -- the Dockerfile already creates `appuser`.
+  For systemd, set `User=www-data` or a dedicated service account.
+- **Use HTTPS in production** -- place a reverse proxy (nginx, Caddy) in
+  front of the proxy to terminate TLS.
+- **Rotate API keys regularly** and restrict them to the minimum required
+  permissions.
+- **Configure firewall rules** to limit who can reach the proxy port.
+
+### Logging
+
+Set `LOG_LEVEL=WARNING` or `ERROR` in production to reduce noise. For
+systemd services, logs are captured by journald:
+
+```bash
+journalctl -u claude-proxy -f
+```
+
+For Docker, use `docker-compose logs -f proxy` or configure a log driver.
