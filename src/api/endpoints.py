@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, Dict, Optional
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+
 from src.conversion.request_converter import convert_claude_to_openai
 from src.conversion.response_converter import (
     _generate_server_tool_id,
@@ -53,7 +54,7 @@ openai_client = OpenAIClient(
 model_manager = ModelManager(config)
 
 # Search provider for WebSearch interception (set during lifespan)
-search_provider: Optional[SearchProvider] = None
+search_provider: Optional[SearchProvider] = None  # pylint: disable=invalid-name
 
 # Shared httpx client for pass-through requests
 _httpx_client: Optional[httpx.AsyncClient] = None  # pylint: disable=invalid-name

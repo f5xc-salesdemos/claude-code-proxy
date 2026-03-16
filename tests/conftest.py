@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
 import pytest
+
 from src.models.claude import ClaudeMessagesRequest
 from src.services.search.base import SearchProvider
 
@@ -112,14 +113,20 @@ class FakeSearchProvider(SearchProvider):
     ):
         self._available = available
         self._error = error
-        self._results = results if results is not None else [
-            {
-                "type": "web_search_result",
-                "url": "https://example.com",
-                "title": "Example",
-                "encrypted_content": "Example content",
-            }
-        ]
+        self.last_allowed_domains: Optional[List[str]] = None
+        self.last_blocked_domains: Optional[List[str]] = None
+        self._results = (
+            results
+            if results is not None
+            else [
+                {
+                    "type": "web_search_result",
+                    "url": "https://example.com",
+                    "title": "Example",
+                    "encrypted_content": "Example content",
+                }
+            ]
+        )
 
     @property
     def provider_name(self) -> str:

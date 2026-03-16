@@ -10,6 +10,7 @@ from typing import Any, Optional
 import httpx
 import uvicorn
 from fastapi import FastAPI
+
 from src.api.endpoints import router as api_router
 from src.core.client import OpenAIClient
 from src.core.config import config

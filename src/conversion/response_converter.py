@@ -7,6 +7,7 @@ import uuid
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from fastapi import HTTPException, Request
+
 from src.core.constants import Constants
 from src.models.claude import ClaudeMessagesRequest
 from src.services.search.base import SearchProvider
@@ -351,14 +352,10 @@ async def convert_openai_streaming_to_claude(
             logger.info("Executing web search for: %s", query)
             # Extract domain filters from web_search_config
             _allowed = (
-                web_search_config.get("allowed_domains")
-                if web_search_config
-                else None
+                web_search_config.get("allowed_domains") if web_search_config else None
             )
             _blocked = (
-                web_search_config.get("blocked_domains")
-                if web_search_config
-                else None
+                web_search_config.get("blocked_domains") if web_search_config else None
             )
             search_result = await search_provider.search(
                 query,

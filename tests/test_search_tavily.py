@@ -1,10 +1,13 @@
 """Tests for the Tavily search provider plugin."""
 
+# pylint: disable=protected-access
+
 import time
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+
 from src.services.search.tavily import TavilySearchProvider
 
 
@@ -225,9 +228,7 @@ class TestTavilySearch:
         """Timeout returns error dict instead of raising."""
         provider = TavilySearchProvider(api_key="tvly-test")
 
-        provider._client.post = AsyncMock(
-            side_effect=httpx.ReadTimeout("Timed out")
-        )
+        provider._client.post = AsyncMock(side_effect=httpx.ReadTimeout("Timed out"))
 
         result = await provider.search("test")
         assert "error" in result

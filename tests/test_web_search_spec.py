@@ -11,6 +11,9 @@ Covers:
 import logging
 
 import pytest
+
+from src.api.endpoints import _build_non_streaming_web_search_response
+from src.conversion.response_converter import convert_openai_streaming_to_claude
 from tests.conftest import (
     FakeSearchProvider,
     collect_streaming_events,
@@ -19,9 +22,6 @@ from tests.conftest import (
     openai_response,
     parse_sse_events,
 )
-from src.conversion.response_converter import convert_openai_streaming_to_claude
-from src.api.endpoints import _build_non_streaming_web_search_response
-
 
 # ---------------------------------------------------------------------------
 # Fix 1: streaming server_tool_use content_block_start includes "input": {}
@@ -115,7 +115,10 @@ class TestStreamingServerToolUseInput:
                                 {
                                     "index": 0,
                                     "id": "call_xyz",
-                                    "function": {"name": "get_weather", "arguments": ""},
+                                    "function": {
+                                        "name": "get_weather",
+                                        "arguments": "",
+                                    },
                                     "type": "function",
                                 }
                             ]
@@ -178,7 +181,21 @@ class TestNonStreamingWebSearchOrdering:
         """With one search, order is: server_tool_use, result, text."""
         resp = openai_response(content="Here is the answer", tool_calls=[])
         request = make_request()
-        search_results = [("test query", {"results": [{"type": "web_search_result", "url": "https://example.com", "title": "Ex", "encrypted_content": "content"}]})]
+        search_results = [
+            (
+                "test query",
+                {
+                    "results": [
+                        {
+                            "type": "web_search_result",
+                            "url": "https://example.com",
+                            "title": "Ex",
+                            "encrypted_content": "content",
+                        }
+                    ]
+                },
+            )
+        ]
 
         result = _build_non_streaming_web_search_response(resp, request, search_results)
         content = result["content"]
@@ -211,8 +228,32 @@ class TestNonStreamingMultipleSearches:
         resp = openai_response(content="Combined answer", tool_calls=[])
         request = make_request()
         search_results = [
-            ("query one", {"results": [{"type": "web_search_result", "url": "https://a.com", "title": "A", "encrypted_content": "a"}]}),
-            ("query two", {"results": [{"type": "web_search_result", "url": "https://b.com", "title": "B", "encrypted_content": "b"}]}),
+            (
+                "query one",
+                {
+                    "results": [
+                        {
+                            "type": "web_search_result",
+                            "url": "https://a.com",
+                            "title": "A",
+                            "encrypted_content": "a",
+                        }
+                    ]
+                },
+            ),
+            (
+                "query two",
+                {
+                    "results": [
+                        {
+                            "type": "web_search_result",
+                            "url": "https://b.com",
+                            "title": "B",
+                            "encrypted_content": "b",
+                        }
+                    ]
+                },
+            ),
             ("query three", {"results": []}),
         ]
 

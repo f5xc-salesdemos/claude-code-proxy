@@ -16,7 +16,6 @@ class SearchProvider(ABC):
     @abstractmethod
     def provider_name(self) -> str:
         """Short identifier for this provider (e.g. ``"tavily"``)."""
-        ...
 
     @abstractmethod
     async def is_available(self) -> bool:
@@ -25,7 +24,6 @@ class SearchProvider(ABC):
         Implementations should cache the result for a reasonable TTL
         to avoid excessive health-check traffic.
         """
-        ...
 
     @abstractmethod
     async def search(
@@ -47,9 +45,7 @@ class SearchProvider(ABC):
         name and should be forwarded to the underlying search API when
         supported.
         """
-        ...
 
     @abstractmethod
     async def close(self) -> None:
         """Release resources (HTTP clients, connections, etc.)."""
-        ...

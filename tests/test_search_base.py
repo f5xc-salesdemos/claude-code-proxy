@@ -1,8 +1,11 @@
 """Tests for the SearchProvider abstract base class."""
 
+# pylint: disable=abstract-class-instantiated,missing-class-docstring
+
 from typing import Any, Dict, List, Optional
 
 import pytest
+
 from src.services.search.base import SearchProvider
 
 
@@ -158,7 +161,11 @@ class TestSearchProviderABC:
                 allowed_domains: Optional[List[str]] = None,
                 blocked_domains: Optional[List[str]] = None,
             ) -> Dict[str, Any]:
-                return {"results": [{"type": "web_search_result", "url": "http://example.com"}]}
+                return {
+                    "results": [
+                        {"type": "web_search_result", "url": "http://example.com"}
+                    ]
+                }
 
             async def close(self):
                 pass

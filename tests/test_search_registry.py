@@ -1,12 +1,15 @@
 """Tests for the search provider registry."""
 
+from typing import Any, Dict, List, Optional
+
 import pytest
+
 from src.services.search.base import SearchProvider
 from src.services.search.registry import (
+    _registry,
     available_providers,
     get_provider,
     register_provider,
-    _registry,
 )
 
 
@@ -23,10 +26,17 @@ class _DummyProvider(SearchProvider):
     async def is_available(self) -> bool:
         return True
 
-    async def search(self, query: str, max_results: int = 5):
+    async def search(  # type: ignore[override]
+        self,
+        query: str,
+        max_results: int = 5,
+        *,
+        allowed_domains: Optional[List[str]] = None,
+        blocked_domains: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         return {"results": []}
 
-    async def close(self):
+    async def close(self) -> None:
         pass
 
 
