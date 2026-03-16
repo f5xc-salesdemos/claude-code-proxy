@@ -50,18 +50,21 @@ class TestLogLevelValidation:
     """log_level field validator normalises and rejects bad values."""
 
     def test_valid_log_level(self, monkeypatch):
+        """Lower-case input is normalised to upper case."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         monkeypatch.setenv("LOG_LEVEL", "debug")
         cfg = Config()
         assert cfg.log_level == "DEBUG"
 
     def test_log_level_with_comment(self, monkeypatch):
+        """Trailing comments after the level are stripped."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         monkeypatch.setenv("LOG_LEVEL", "WARNING # be quiet")
         cfg = Config()
         assert cfg.log_level == "WARNING"
 
     def test_invalid_log_level_defaults_to_info(self, monkeypatch):
+        """Unknown level strings fall back to INFO."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         monkeypatch.setenv("LOG_LEVEL", "VERBOSE")
         cfg = Config()
@@ -72,6 +75,7 @@ class TestMiddleModelDefault:
     """middle_model falls back to big_model when not set."""
 
     def test_middle_defaults_to_big(self, monkeypatch):
+        """When MIDDLE_MODEL is unset, it inherits from BIG_MODEL."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         monkeypatch.setenv("BIG_MODEL", "my-big")
         monkeypatch.delenv("MIDDLE_MODEL", raising=False)
@@ -79,6 +83,7 @@ class TestMiddleModelDefault:
         assert cfg.middle_model == "my-big"
 
     def test_middle_overridden(self, monkeypatch):
+        """Explicit MIDDLE_MODEL takes precedence over BIG_MODEL."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         monkeypatch.setenv("BIG_MODEL", "my-big")
         monkeypatch.setenv("MIDDLE_MODEL", "my-mid")
@@ -90,18 +95,21 @@ class TestClientApiKeyValidation:
     """validate_client_api_key() behaviour."""
 
     def test_no_anthropic_key_accepts_all(self, monkeypatch):
+        """Without ANTHROPIC_API_KEY, any client key is accepted."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         cfg = Config()
         assert cfg.validate_client_api_key("anything") is True
 
     def test_matching_key_accepted(self, monkeypatch):
+        """Correct client key passes validation."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
         cfg = Config()
         assert cfg.validate_client_api_key("secret") is True
 
     def test_wrong_key_rejected(self, monkeypatch):
+        """Incorrect client key fails validation."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
         cfg = Config()
@@ -112,6 +120,7 @@ class TestCustomHeaders:
     """get_custom_headers() scans CUSTOM_HEADER_* env vars."""
 
     def test_custom_headers(self, monkeypatch):
+        """CUSTOM_HEADER_* env vars become HTTP headers with hyphens."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         monkeypatch.setenv("CUSTOM_HEADER_X_MY_HEADER", "value1")
         monkeypatch.setenv("CUSTOM_HEADER_AUTH_TOKEN", "tok123")
@@ -121,6 +130,7 @@ class TestCustomHeaders:
         assert headers["AUTH-TOKEN"] == "tok123"
 
     def test_no_custom_headers(self, monkeypatch):
+        """No CUSTOM_HEADER_* vars returns empty dict."""
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         # Remove any CUSTOM_HEADER_ vars that may exist
         for key in list(os.environ):
