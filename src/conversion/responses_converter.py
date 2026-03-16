@@ -9,6 +9,7 @@ then converts the responses back.
 import json
 import logging
 import uuid
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import HTTPException, Request
 
@@ -26,7 +27,7 @@ def convert_responses_to_chat_completions(body: dict) -> dict:
       - Pass-through: model, temperature, top_p, stream, tool_choice
       - Strip: reasoning, previous_response_id, truncation, text, store
     """
-    messages: list[dict] = []
+    messages: List[Dict[str, Any]] = []
 
     # System message from instructions
     instructions = body.get("instructions")
@@ -91,12 +92,12 @@ def convert_responses_to_chat_completions(body: dict) -> dict:
     return cc_request
 
 
-def _convert_input_items(items: list, messages: list[dict]) -> None:
+def _convert_input_items(items: list, messages: List[Dict[str, Any]]) -> None:  # type: ignore[type-arg]
     """Walk the Responses API ``input`` array and append to *messages*."""
     # We may need to coalesce consecutive user content parts
-    pending_assistant: dict | None = None
+    pending_assistant: Optional[Dict[str, Any]] = None
 
-    def _flush_assistant():
+    def _flush_assistant() -> None:
         nonlocal pending_assistant
         if pending_assistant is not None:
             messages.append(pending_assistant)
@@ -212,7 +213,7 @@ def build_response_object(openai_response: dict, original_body: dict) -> dict:
     message = choice.get("message", {})
     finish_reason = choice.get("finish_reason", "stop")
 
-    output: list[dict] = []
+    output: List[Dict[str, Any]] = []
     response_id = f"resp_{uuid.uuid4().hex[:24]}"
 
     # Text content → output_text item
@@ -273,12 +274,12 @@ def build_response_object(openai_response: dict, original_body: dict) -> dict:
 
 
 async def stream_responses_from_chat_completions(
-    openai_stream,
+    openai_stream: AsyncGenerator[str, None],
     body: dict,
     http_request: Request,
-    openai_client,
+    openai_client: Any,
     request_id: str,
-):
+) -> AsyncGenerator[str, None]:
     """Consume Chat Completions SSE and re-emit as Responses API SSE events."""
     response_id = f"resp_{uuid.uuid4().hex[:24]}"
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
@@ -288,7 +289,7 @@ async def stream_responses_from_chat_completions(
     text_started = False
     text_content_index = 0  # index within the output array
     text_buffer = ""
-    tool_calls: dict[int, dict] = {}  # keyed by tc_index from upstream
+    tool_calls: Dict[int, Dict[str, Any]] = {}  # keyed by tc_index from upstream
     tool_output_index = 1  # output array index (0 = message)
 
     # -- response.created
@@ -567,7 +568,7 @@ async def stream_responses_from_chat_completions(
             )
 
     # Build final output array for the completed event
-    final_output: list[dict] = []
+    final_output: List[Dict[str, Any]] = []
     if text_buffer:
         final_output.append(
             {

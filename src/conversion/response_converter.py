@@ -1,12 +1,13 @@
 import json
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from fastapi import HTTPException, Request
 
 from src.core.constants import Constants
 from src.models.claude import ClaudeMessagesRequest
+from src.services.searxng import SearXNGClient
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +17,11 @@ def _generate_server_tool_id() -> str:
 
 
 def convert_openai_to_claude_response(
-    openai_response: dict,
+    openai_response: Dict[str, Any],
     original_request: ClaudeMessagesRequest,
     web_search_config: Optional[Dict[str, Any]] = None,
-    searxng_client=None,
-) -> dict:
+    searxng_client: Optional[SearXNGClient] = None,
+) -> Dict[str, Any]:
     """Convert OpenAI response to Claude format.
 
     NOTE: For web_search interception in non-streaming mode the caller
@@ -104,8 +105,10 @@ def convert_openai_to_claude_response(
 
 
 async def convert_openai_streaming_to_claude(
-    openai_stream, original_request: ClaudeMessagesRequest, logger
-):
+    openai_stream: AsyncGenerator[str, None],
+    original_request: ClaudeMessagesRequest,
+    logger: logging.Logger,
+) -> AsyncGenerator[str, None]:
     """Convert OpenAI streaming response to Claude streaming format."""
 
     message_id = f"msg_{uuid.uuid4().hex[:24]}"
@@ -124,7 +127,7 @@ async def convert_openai_streaming_to_claude(
     text_block_started = False
     text_block_index = 0
     tool_block_counter = 0
-    current_tool_calls = {}
+    current_tool_calls: Dict[int, Dict[str, Any]] = {}
     final_stop_reason = Constants.STOP_END_TURN
 
     try:
@@ -259,15 +262,15 @@ async def convert_openai_streaming_to_claude(
 
 
 async def convert_openai_streaming_to_claude_with_cancellation(
-    openai_stream,
+    openai_stream: AsyncGenerator[str, None],
     original_request: ClaudeMessagesRequest,
-    logger,
+    logger: logging.Logger,
     http_request: Request,
-    openai_client,
+    openai_client: Any,
     request_id: str,
     web_search_config: Optional[Dict[str, Any]] = None,
-    searxng_client=None,
-):
+    searxng_client: Optional[SearXNGClient] = None,
+) -> AsyncGenerator[str, None]:
     """Convert OpenAI streaming response to Claude streaming format with cancellation support."""
 
     message_id = f"msg_{uuid.uuid4().hex[:24]}"
@@ -283,9 +286,9 @@ async def convert_openai_streaming_to_claude_with_cancellation(
     text_block_started = False
     text_block_index = 0
     tool_block_counter = 0
-    current_tool_calls = {}
+    current_tool_calls: Dict[int, Dict[str, Any]] = {}
     final_stop_reason = Constants.STOP_END_TURN
-    usage_data = {"input_tokens": 0, "output_tokens": 0}
+    usage_data: Dict[str, Any] = {"input_tokens": 0, "output_tokens": 0}
     web_search_count = 0
 
     try:

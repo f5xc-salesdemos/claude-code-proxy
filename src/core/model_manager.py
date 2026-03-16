@@ -1,8 +1,15 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from src.core.config import config
+
+if TYPE_CHECKING:
+    from src.core.config import Config
 
 
 class ModelManager:
-    def __init__(self, config):
+    def __init__(self, config: "Config") -> None:
         self.config = config
 
     def map_claude_model_to_openai(self, claude_model: str) -> str:
@@ -22,14 +29,14 @@ class ModelManager:
         # Map based on model naming patterns
         model_lower = claude_model.lower()
         if "haiku" in model_lower:
-            return self.config.small_model
+            return str(self.config.small_model)
         elif "sonnet" in model_lower:
-            return self.config.middle_model
+            return str(self.config.middle_model)
         elif "opus" in model_lower:
-            return self.config.big_model
+            return str(self.config.big_model)
         else:
             # Default to big model for unknown models
-            return self.config.big_model
+            return str(self.config.big_model)
 
 
 model_manager = ModelManager(config)

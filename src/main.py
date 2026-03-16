@@ -1,6 +1,7 @@
 import os
 import signal
 import sys
+from typing import Any, Optional
 
 import uvicorn
 from fastapi import FastAPI
@@ -24,11 +25,11 @@ app.include_router(api_router)
 #   2.  POST /admin/reload   (sends SIGHUP to itself)
 # ---------------------------------------------------------------------------
 
-_server: uvicorn.Server | None = None
+_server: Optional[uvicorn.Server] = None
 _reload_requested: bool = False
 
 
-def _sighup_handler(signum, frame):
+def _sighup_handler(signum: int, frame: Any) -> None:
     """Handle SIGHUP by requesting a graceful restart."""
     global _reload_requested
     _reload_requested = True
@@ -36,7 +37,7 @@ def _sighup_handler(signum, frame):
         _server.should_exit = True
 
 
-def main():
+def main() -> None:
     global _server, _reload_requested
 
     if len(sys.argv) > 1 and sys.argv[1] == "--help":

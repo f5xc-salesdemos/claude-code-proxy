@@ -1,13 +1,15 @@
 import os
 import sys
+from typing import Dict
 
 
 # Configuration
 class Config:
-    def __init__(self):
-        self.openai_api_key = os.environ.get("OPENAI_API_KEY")
-        if not self.openai_api_key:
+    def __init__(self) -> None:
+        openai_api_key = os.environ.get("OPENAI_API_KEY")
+        if not openai_api_key:
             raise ValueError("OPENAI_API_KEY not found in environment variables")
+        self.openai_api_key: str = openai_api_key
 
         # Add Anthropic API key for client validation
         self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -34,7 +36,7 @@ class Config:
         self.middle_model = os.environ.get("MIDDLE_MODEL", self.big_model)
         self.small_model = os.environ.get("SMALL_MODEL", "gpt-4o-mini")
 
-    def validate_api_key(self):
+    def validate_api_key(self) -> bool:
         """Basic API key validation"""
         if not self.openai_api_key:
             return False
@@ -43,7 +45,7 @@ class Config:
             return False
         return True
 
-    def validate_client_api_key(self, client_api_key):
+    def validate_client_api_key(self, client_api_key: str) -> bool:
         """Validate client's Anthropic API key"""
         # If no ANTHROPIC_API_KEY is set in environment, skip validation
         if not self.anthropic_api_key:
@@ -52,7 +54,7 @@ class Config:
         # Check if the client's API key matches the expected value
         return client_api_key == self.anthropic_api_key
 
-    def get_custom_headers(self):
+    def get_custom_headers(self) -> Dict[str, str]:
         """Get custom headers from environment variables"""
         custom_headers = {}
 

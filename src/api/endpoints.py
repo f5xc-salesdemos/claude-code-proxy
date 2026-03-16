@@ -3,7 +3,7 @@ import os
 import signal
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -67,7 +67,7 @@ def _extract_bearer_token(
 
 async def validate_api_key(
     x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)
-):
+) -> None:
     """Validate the client's API key against ANTHROPIC_API_KEY (Claude Code flow)."""
     client_api_key = _extract_bearer_token(x_api_key, authorization)
 
@@ -85,7 +85,7 @@ async def validate_api_key(
 
 async def validate_openai_api_key(
     x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)
-):
+) -> None:
     """Validate the client's API key against either ANTHROPIC_API_KEY or OPENAI_API_KEY.
 
     Used by Responses API, Chat Completions pass-through, and Models endpoints
@@ -118,7 +118,7 @@ async def validate_openai_api_key(
 @router.post("/v1/messages")
 async def create_message(
     request: ClaudeMessagesRequest, http_request: Request, _: None = Depends(validate_api_key)
-):
+) -> Any:
     try:
         logger.debug(f"Processing Claude request: model={request.model}, stream={request.stream}")
 
@@ -292,7 +292,7 @@ def _build_non_streaming_web_search_response(
 
 @router.post("/responses")
 @router.post("/v1/responses")
-async def create_response(http_request: Request, _: None = Depends(validate_openai_api_key)):
+async def create_response(http_request: Request, _: None = Depends(validate_openai_api_key)) -> Any:
     """Translate an OpenAI Responses API request to Chat Completions."""
     try:
         body = await http_request.json()
@@ -350,7 +350,7 @@ async def create_response(http_request: Request, _: None = Depends(validate_open
 @router.post("/v1/chat/completions")
 async def chat_completions_passthrough(
     http_request: Request, _: None = Depends(validate_openai_api_key)
-):
+) -> Any:
     """Forward Chat Completions requests to the upstream server unchanged."""
     try:
         body = await http_request.body()
@@ -376,7 +376,7 @@ async def chat_completions_passthrough(
                     status_code=upstream_resp.status_code, content=json.loads(resp_body)
                 )
 
-            async def _stream():
+            async def _stream() -> AsyncGenerator[str, None]:
                 try:
                     async for line in upstream_resp.aiter_lines():
                         yield f"{line}\n\n"
@@ -414,7 +414,7 @@ async def chat_completions_passthrough(
 
 @router.get("/models")
 @router.get("/v1/models")
-async def list_models(_: None = Depends(validate_openai_api_key)):
+async def list_models(_: None = Depends(validate_openai_api_key)) -> Any:
     """Forward /models request to the upstream server."""
     try:
         upstream_url = config.openai_base_url.rstrip("/") + "/models"
@@ -434,7 +434,9 @@ async def list_models(_: None = Depends(validate_openai_api_key)):
 
 
 @router.post("/v1/messages/count_tokens")
-async def count_tokens(request: ClaudeTokenCountRequest, _: None = Depends(validate_api_key)):
+async def count_tokens(
+    request: ClaudeTokenCountRequest, _: None = Depends(validate_api_key)
+) -> Dict[str, int]:
     try:
         # For token counting, we'll use a simple estimation
         # In a real implementation, you might want to use tiktoken or similar
@@ -446,9 +448,9 @@ async def count_tokens(request: ClaudeTokenCountRequest, _: None = Depends(valid
             if isinstance(request.system, str):
                 total_chars += len(request.system)
             elif isinstance(request.system, list):
-                for block in request.system:
-                    if hasattr(block, "text"):
-                        total_chars += len(block.text)
+                for sys_block in request.system:
+                    if hasattr(sys_block, "text"):
+                        total_chars += len(sys_block.text)
 
         # Count message characters
         for msg in request.messages:
@@ -472,7 +474,7 @@ async def count_tokens(request: ClaudeTokenCountRequest, _: None = Depends(valid
 
 
 @router.get("/health")
-async def health_check():
+async def health_check() -> Dict[str, Any]:
     """Health check endpoint"""
     return {
         "status": "healthy",
@@ -485,7 +487,7 @@ async def health_check():
 
 
 @router.get("/test-connection")
-async def test_connection():
+async def test_connection() -> Any:
     """Test API connectivity to OpenAI"""
     try:
         # Simple test request to verify API connectivity
@@ -529,7 +531,7 @@ async def test_connection():
 
 
 @router.post("/admin/reload")
-async def admin_reload(_: None = Depends(validate_api_key)):
+async def admin_reload(_: None = Depends(validate_api_key)) -> JSONResponse:
     """Trigger a graceful proxy reload via SIGHUP.
 
     The server finishes in-flight requests, shuts down, and restarts
@@ -547,7 +549,7 @@ async def admin_reload(_: None = Depends(validate_api_key)):
 
 
 @router.get("/")
-async def root():
+async def root() -> Dict[str, Any]:
     """Root endpoint"""
     return {
         "message": "Claude-to-OpenAI API Proxy v1.0.0",

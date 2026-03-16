@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional, Union
 
 from fastapi import HTTPException
 from openai import AsyncAzureOpenAI, AsyncOpenAI
@@ -35,6 +35,7 @@ class OpenAIClient:
         all_headers = {**default_headers, **self.custom_headers}
 
         # Detect if using Azure and instantiate the appropriate client
+        self.client: Union[AsyncAzureOpenAI, AsyncOpenAI]
         if api_version:
             self.client = AsyncAzureOpenAI(
                 api_key=api_key,
@@ -88,7 +89,8 @@ class OpenAIClient:
                 completion = await completion_task
 
             # Convert to dict format that matches the original interface
-            return completion.model_dump()
+            result: Dict[str, Any] = completion.model_dump()
+            return result
 
         except AuthenticationError as e:
             logger.error(f"Upstream AuthenticationError: {e}")

@@ -71,5 +71,5 @@ class SearXNGClient:
                 }
             }
 
-    async def close(self):
+    async def close(self) -> None:
         await self._client.aclose()

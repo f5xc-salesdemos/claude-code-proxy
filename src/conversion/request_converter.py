@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.core.config import config
 from src.core.constants import Constants
-from src.models.claude import ClaudeMessage, ClaudeMessagesRequest
+from src.models.claude import ClaudeMessage, ClaudeMessagesRequest, ClaudeTool
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +58,14 @@ def _is_web_search_tool(tool: Any) -> bool:
 def _block_type(block: Any) -> str:
     """Get the type of a content block, whether Pydantic model or dict."""
     if hasattr(block, "type"):
-        return block.type
+        return str(block.type)
     if isinstance(block, dict):
-        return block.get("type", "")
+        return str(block.get("type", ""))
     return ""
 
 
 def convert_claude_to_openai(
-    claude_request: ClaudeMessagesRequest, model_manager
+    claude_request: ClaudeMessagesRequest, model_manager: Any
 ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
     """Convert Claude API request format to OpenAI format.
 
@@ -158,7 +158,7 @@ def convert_claude_to_openai(
                 web_search_config = tool if isinstance(tool, dict) else None
                 # Inject synthetic OpenAI function tool for web_search
                 openai_tools.append(_WEB_SEARCH_OPENAI_TOOL)
-            elif hasattr(tool, "name") and hasattr(tool, "input_schema"):
+            elif isinstance(tool, ClaudeTool):
                 # Regular ClaudeTool Pydantic model
                 if tool.name and tool.name.strip():
                     openai_tools.append(
@@ -210,13 +210,19 @@ def convert_claude_user_message(msg: ClaudeMessage) -> Dict[str, Any]:
     for block in msg.content:
         btype = _block_type(block)
         if btype == Constants.CONTENT_TEXT:
-            text = block.text if hasattr(block, "text") else block.get("text", "")
+            if isinstance(block, dict):
+                text = block.get("text", "")
+            else:
+                text = getattr(block, "text", "")
             if _is_placeholder_text(text):
                 continue  # Skip placeholder text blocks
             openai_content.append({"type": "text", "text": text})
         elif btype == Constants.CONTENT_IMAGE:
             # Convert Claude image format to OpenAI format
-            source = block.source if hasattr(block, "source") else block.get("source", {})
+            if isinstance(block, dict):
+                source = block.get("source", {})
+            else:
+                source = getattr(block, "source", {})
             if (
                 isinstance(source, dict)
                 and source.get("type") == "base64"
@@ -275,7 +281,10 @@ def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
         btype = _block_type(block)
 
         if btype == Constants.CONTENT_TEXT:
-            text = block.text if hasattr(block, "text") else block.get("text", "")
+            if isinstance(block, dict):
+                text = block.get("text", "")
+            else:
+                text = getattr(block, "text", "")
             # Skip empty/whitespace-only text and known placeholder
             # strings to avoid triggering LiteLLM's sanitisation which
             # injects "[System: Empty message content sanitised to
@@ -284,9 +293,14 @@ def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
                 text_parts.append(text)
 
         elif btype == Constants.CONTENT_TOOL_USE:
-            block_id = block.id if hasattr(block, "id") else block.get("id", "")
-            block_name = block.name if hasattr(block, "name") else block.get("name", "")
-            block_input = block.input if hasattr(block, "input") else block.get("input", {})
+            if isinstance(block, dict):
+                block_id = block.get("id", "")
+                block_name = block.get("name", "")
+                block_input = block.get("input", {})
+            else:
+                block_id = getattr(block, "id", "")
+                block_name = getattr(block, "name", "")
+                block_input = getattr(block, "input", {})
             tool_calls.append(
                 {
                     "id": block_id,
@@ -368,12 +382,12 @@ def convert_claude_tool_results(msg: ClaudeMessage) -> List[Dict[str, Any]]:
         for block in msg.content:
             btype = _block_type(block)
             if btype == Constants.CONTENT_TOOL_RESULT:
-                content_val = block.content if hasattr(block, "content") else block.get("content")
-                tool_use_id = (
-                    block.tool_use_id
-                    if hasattr(block, "tool_use_id")
-                    else block.get("tool_use_id", "")
-                )
+                if isinstance(block, dict):
+                    content_val = block.get("content")
+                    tool_use_id = block.get("tool_use_id", "")
+                else:
+                    content_val = getattr(block, "content", None)
+                    tool_use_id = getattr(block, "tool_use_id", "")
                 content = parse_tool_result_content(content_val)
                 tool_messages.append(
                     {
@@ -386,7 +400,7 @@ def convert_claude_tool_results(msg: ClaudeMessage) -> List[Dict[str, Any]]:
     return tool_messages
 
 
-def parse_tool_result_content(content):
+def parse_tool_result_content(content: Any) -> str:
     """Parse and normalize tool result content into a string format."""
     if content is None:
         return "No content provided"
@@ -413,7 +427,7 @@ def parse_tool_result_content(content):
 
     if isinstance(content, dict):
         if content.get("type") == Constants.CONTENT_TEXT:
-            return content.get("text", "")
+            return str(content.get("text", ""))
         try:
             return json.dumps(content, ensure_ascii=False)
         except:
