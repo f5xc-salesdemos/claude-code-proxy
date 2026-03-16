@@ -75,6 +75,9 @@ markers = [
 line-length = 88
 target-version = "py313"
 
+[tool.pylint."messages_control"]
+disable = ["E0401", "E1101", "W1203"]
+
 [tool.mypy]
 python_version = "3.13"
 warn_return_any = true

@@ -69,6 +69,144 @@ def _block_type(block: Any) -> str:
     return ""
 
 
+def _get_block_text(block: Any) -> str:
+    """Extract the text value from a content block (dict or Pydantic model)."""
+    if isinstance(block, dict):
+        return block.get("text", "")
+    return getattr(block, "text", "")
+
+
+def _is_tool_result_message(msg: ClaudeMessage) -> bool:
+    """Return True if the message contains at least one tool_result block."""
+    return (
+        msg.role == Constants.ROLE_USER
+        and isinstance(msg.content, list)
+        and any(
+            _block_type(block) == Constants.CONTENT_TOOL_RESULT for block in msg.content
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# convert_claude_to_openai — helpers
+# ---------------------------------------------------------------------------
+
+
+def _convert_system_message(
+    system: Any,
+) -> Optional[Dict[str, Any]]:
+    """Convert Claude system prompt to an OpenAI system message dict.
+
+    Returns None if the system prompt is empty or whitespace-only.
+    """
+    if not system:
+        return None
+
+    if isinstance(system, str):
+        system_text = system
+    elif isinstance(system, list):
+        text_parts = []
+        for block in system:
+            if hasattr(block, "type") and block.type == Constants.CONTENT_TEXT:
+                text_parts.append(block.text)
+            elif (
+                isinstance(block, dict) and block.get("type") == Constants.CONTENT_TEXT
+            ):
+                text_parts.append(block.get("text", ""))
+        system_text = "\n\n".join(text_parts)
+    else:
+        return None
+
+    stripped = system_text.strip()
+    if not stripped:
+        return None
+    return {"role": Constants.ROLE_SYSTEM, "content": stripped}
+
+
+def _convert_messages_list(
+    messages: List[ClaudeMessage],
+) -> List[Dict[str, Any]]:
+    """Convert Claude messages to OpenAI messages, pairing tool results."""
+    openai_messages: List[Dict[str, Any]] = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+
+        if msg.role == Constants.ROLE_USER:
+            openai_messages.append(convert_claude_user_message(msg))
+        elif msg.role == Constants.ROLE_ASSISTANT:
+            result = convert_claude_assistant_message(msg)
+            openai_messages.append(result["message"])
+            if result["extra_tool_messages"]:
+                openai_messages.extend(result["extra_tool_messages"])
+
+            # Check if next message contains tool results
+            if i + 1 < len(messages) and _is_tool_result_message(messages[i + 1]):
+                i += 1  # Skip to tool result message
+                openai_messages.extend(convert_claude_tool_results(messages[i]))
+
+        i += 1
+    return openai_messages
+
+
+def _convert_tools(
+    tools: Optional[List[Any]],
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Convert Claude tools to OpenAI function tools.
+
+    Returns (openai_tools, web_search_config).
+    """
+    if not tools:
+        return [], None
+
+    openai_tools: List[Dict[str, Any]] = []
+    web_search_config: Optional[Dict[str, Any]] = None
+
+    for tool in tools:
+        if _is_web_search_tool(tool):
+            web_search_config = tool if isinstance(tool, dict) else None
+            openai_tools.append(_WEB_SEARCH_OPENAI_TOOL)
+        elif isinstance(tool, ClaudeTool):
+            if tool.name and tool.name.strip():
+                openai_tools.append(
+                    {
+                        "type": Constants.TOOL_FUNCTION,
+                        Constants.TOOL_FUNCTION: {
+                            "name": tool.name,
+                            "description": tool.description or "",
+                            "parameters": tool.input_schema,
+                        },
+                    }
+                )
+        elif isinstance(tool, dict) and tool.get("name"):
+            logger.debug("Skipping unknown tool type: %s", tool.get("type", "none"))
+
+    return openai_tools, web_search_config
+
+
+def _convert_tool_choice(
+    tool_choice: Optional[Dict[str, Any]],
+) -> Optional[Any]:
+    """Map Claude tool_choice to OpenAI tool_choice."""
+    if not tool_choice:
+        return None
+
+    choice_type = tool_choice.get("type")
+    if choice_type in ("auto", "any"):
+        return "auto"
+    if choice_type == "tool" and "name" in tool_choice:
+        return {
+            "type": Constants.TOOL_FUNCTION,
+            Constants.TOOL_FUNCTION: {"name": tool_choice["name"]},
+        }
+    return "auto"
+
+
+# ---------------------------------------------------------------------------
+# convert_claude_to_openai — main entry point
+# ---------------------------------------------------------------------------
+
+
 def convert_claude_to_openai(
     claude_request: ClaudeMessagesRequest, model_manager: Any
 ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
@@ -78,69 +216,17 @@ def convert_claude_to_openai(
     is the original Anthropic web_search tool dict if one was present,
     or None otherwise.
     """
-
-    # Map model
     openai_model = model_manager.map_claude_model_to_openai(claude_request.model)
 
-    # Convert messages
-    openai_messages = []
+    # Build messages list
+    openai_messages: List[Dict[str, Any]] = []
+    system_msg = _convert_system_message(claude_request.system)
+    if system_msg:
+        openai_messages.append(system_msg)
+    openai_messages.extend(_convert_messages_list(claude_request.messages))
 
-    # Add system message if present
-    if claude_request.system:
-        system_text = ""
-        if isinstance(claude_request.system, str):
-            system_text = claude_request.system
-        elif isinstance(claude_request.system, list):
-            text_parts = []
-            for block in claude_request.system:
-                if hasattr(block, "type") and block.type == Constants.CONTENT_TEXT:
-                    text_parts.append(block.text)
-                elif (
-                    isinstance(block, dict)
-                    and block.get("type") == Constants.CONTENT_TEXT
-                ):
-                    text_parts.append(block.get("text", ""))
-            system_text = "\n\n".join(text_parts)
-
-        if system_text.strip():
-            openai_messages.append(
-                {"role": Constants.ROLE_SYSTEM, "content": system_text.strip()}
-            )
-
-    # Process Claude messages
-    i = 0
-    while i < len(claude_request.messages):
-        msg = claude_request.messages[i]
-
-        if msg.role == Constants.ROLE_USER:
-            openai_message = convert_claude_user_message(msg)
-            openai_messages.append(openai_message)
-        elif msg.role == Constants.ROLE_ASSISTANT:
-            result = convert_claude_assistant_message(msg)
-            openai_messages.append(result["message"])
-            if result["extra_tool_messages"]:
-                openai_messages.extend(result["extra_tool_messages"])
-
-            # Check if next message contains tool results
-            if i + 1 < len(claude_request.messages):
-                next_msg = claude_request.messages[i + 1]
-                if (
-                    next_msg.role == Constants.ROLE_USER
-                    and isinstance(next_msg.content, list)
-                    and any(
-                        _block_type(block) == Constants.CONTENT_TOOL_RESULT
-                        for block in next_msg.content
-                    )
-                ):
-                    # Process tool results
-                    i += 1  # Skip to tool result message
-                    tool_results = convert_claude_tool_results(next_msg)
-                    openai_messages.extend(tool_results)
-
-        i += 1
-
-    # Build OpenAI request
-    openai_request = {
+    # Build base request
+    openai_request: Dict[str, Any] = {
         "model": openai_model,
         "messages": openai_messages,
         "max_tokens": min(
@@ -151,58 +237,56 @@ def convert_claude_to_openai(
         "stream": claude_request.stream,
     }
     logger.debug(
-        f"Converted Claude request to OpenAI format: {json.dumps(openai_request, indent=2, ensure_ascii=False)}"
+        "Converted Claude request to OpenAI format: %s",
+        json.dumps(openai_request, indent=2, ensure_ascii=False),
     )
-    # Add optional parameters
+
+    # Optional parameters
     if claude_request.stop_sequences:
         openai_request["stop"] = claude_request.stop_sequences
     if claude_request.top_p is not None:
         openai_request["top_p"] = claude_request.top_p
 
-    # Convert tools — separate server tools from regular tools
-    web_search_config: Optional[Dict[str, Any]] = None
-    if claude_request.tools:
-        openai_tools = []
-        for tool in claude_request.tools:
-            if _is_web_search_tool(tool):
-                web_search_config = tool if isinstance(tool, dict) else None
-                # Inject synthetic OpenAI function tool for web_search
-                openai_tools.append(_WEB_SEARCH_OPENAI_TOOL)
-            elif isinstance(tool, ClaudeTool):
-                # Regular ClaudeTool Pydantic model
-                if tool.name and tool.name.strip():
-                    openai_tools.append(
-                        {
-                            "type": Constants.TOOL_FUNCTION,
-                            Constants.TOOL_FUNCTION: {
-                                "name": tool.name,
-                                "description": tool.description or "",
-                                "parameters": tool.input_schema,
-                            },
-                        }
-                    )
-            elif isinstance(tool, dict) and tool.get("name"):
-                # Unknown dict-based tool — skip silently
-                logger.debug(f"Skipping unknown tool type: {tool.get('type', 'none')}")
-        if openai_tools:
-            openai_request["tools"] = openai_tools
+    # Tools
+    openai_tools, web_search_config = _convert_tools(claude_request.tools)
+    if openai_tools:
+        openai_request["tools"] = openai_tools
 
-    # Convert tool choice
-    if claude_request.tool_choice:
-        choice_type = claude_request.tool_choice.get("type")
-        if choice_type == "auto":
-            openai_request["tool_choice"] = "auto"
-        elif choice_type == "any":
-            openai_request["tool_choice"] = "auto"
-        elif choice_type == "tool" and "name" in claude_request.tool_choice:
-            openai_request["tool_choice"] = {
-                "type": Constants.TOOL_FUNCTION,
-                Constants.TOOL_FUNCTION: {"name": claude_request.tool_choice["name"]},
-            }
-        else:
-            openai_request["tool_choice"] = "auto"
+    # Tool choice
+    mapped_choice = _convert_tool_choice(claude_request.tool_choice)
+    if mapped_choice is not None:
+        openai_request["tool_choice"] = mapped_choice
 
     return openai_request, web_search_config
+
+
+# ---------------------------------------------------------------------------
+# convert_claude_user_message — helpers
+# ---------------------------------------------------------------------------
+
+
+def _convert_image_block(block: Any) -> Optional[Dict[str, Any]]:
+    """Convert a Claude image content block to OpenAI image_url format.
+
+    Returns None if the source is not a valid base64 image.
+    """
+    if isinstance(block, dict):
+        source = block.get("source", {})
+    else:
+        source = getattr(block, "source", {})
+
+    if not (
+        isinstance(source, dict)
+        and source.get("type") == "base64"
+        and "media_type" in source
+        and "data" in source
+    ):
+        return None
+
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{source['media_type']};base64,{source['data']}"},
+    }
 
 
 def convert_claude_user_message(msg: ClaudeMessage) -> Dict[str, Any]:
@@ -216,37 +300,18 @@ def convert_claude_user_message(msg: ClaudeMessage) -> Dict[str, Any]:
         return {"role": Constants.ROLE_USER, "content": msg.content}
 
     # Handle multimodal content
-    openai_content = []
+    openai_content: List[Dict[str, Any]] = []
     for block in msg.content:
         btype = _block_type(block)
         if btype == Constants.CONTENT_TEXT:
-            if isinstance(block, dict):
-                text = block.get("text", "")
-            else:
-                text = getattr(block, "text", "")
+            text = _get_block_text(block)
             if _is_placeholder_text(text):
-                continue  # Skip placeholder text blocks
+                continue
             openai_content.append({"type": "text", "text": text})
         elif btype == Constants.CONTENT_IMAGE:
-            # Convert Claude image format to OpenAI format
-            if isinstance(block, dict):
-                source = block.get("source", {})
-            else:
-                source = getattr(block, "source", {})
-            if (
-                isinstance(source, dict)
-                and source.get("type") == "base64"
-                and "media_type" in source
-                and "data" in source
-            ):
-                openai_content.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{source['media_type']};base64,{source['data']}"
-                        },
-                    }
-                )
+            image_block = _convert_image_block(block)
+            if image_block:
+                openai_content.append(image_block)
 
     if not openai_content:
         return {"role": Constants.ROLE_USER, "content": ""}
@@ -254,6 +319,68 @@ def convert_claude_user_message(msg: ClaudeMessage) -> Dict[str, Any]:
     if len(openai_content) == 1 and openai_content[0]["type"] == "text":
         return {"role": Constants.ROLE_USER, "content": openai_content[0]["text"]}
     return {"role": Constants.ROLE_USER, "content": openai_content}
+
+
+# ---------------------------------------------------------------------------
+# convert_claude_assistant_message — helpers
+# ---------------------------------------------------------------------------
+
+
+def _empty_assistant_result() -> Dict[str, Any]:
+    """Return a result dict with content=None and no extra messages."""
+    return {
+        "message": {"role": Constants.ROLE_ASSISTANT, "content": None},
+        "extra_tool_messages": [],
+    }
+
+
+def _convert_tool_use_block(block: Any) -> Dict[str, Any]:
+    """Convert a tool_use or server_tool_use block to OpenAI tool_call format."""
+    if isinstance(block, dict):
+        block_id = block.get("id", "")
+        block_name = block.get("name", "")
+        block_input = block.get("input", {})
+    else:
+        block_id = getattr(block, "id", "")
+        block_name = getattr(block, "name", "")
+        block_input = getattr(block, "input", {})
+    return {
+        "id": block_id,
+        "type": Constants.TOOL_FUNCTION,
+        Constants.TOOL_FUNCTION: {
+            "name": block_name,
+            "arguments": json.dumps(block_input, ensure_ascii=False),
+        },
+    }
+
+
+def _convert_web_search_result_block(block: Any) -> Dict[str, Any]:
+    """Convert a web_search_tool_result block to an OpenAI tool message."""
+    tool_use_id = block.get("tool_use_id", "") if isinstance(block, dict) else ""
+    content = block.get("content", []) if isinstance(block, dict) else []
+
+    if isinstance(content, list):
+        result_texts = []
+        for r in content:
+            if isinstance(r, dict) and r.get("type") == "web_search_result":
+                title = r.get("title", "")
+                url = r.get("url", "")
+                snippet = r.get("encrypted_content", "")
+                result_texts.append(f"[{title}]({url})\n{snippet}")
+        summary = "\n\n".join(result_texts) if result_texts else "No results"
+    elif (
+        isinstance(content, dict)
+        and content.get("type") == "web_search_tool_result_error"
+    ):
+        summary = f"Search error: {content.get('error_code', 'unknown')}"
+    else:
+        summary = str(content)
+
+    return {
+        "role": Constants.ROLE_TOOL,
+        "tool_call_id": tool_use_id,
+        "content": summary,
+    }
 
 
 def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
@@ -265,118 +392,37 @@ def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
         web_search_tool_result blocks (which Claude embeds in the
         assistant message but OpenAI needs as separate tool messages)
     """
-    text_parts = []
-    tool_calls = []
-    extra_tool_messages: List[Dict[str, Any]] = []
-
     if msg.content is None:
-        return {
-            "message": {"role": Constants.ROLE_ASSISTANT, "content": None},
-            "extra_tool_messages": [],
-        }
+        return _empty_assistant_result()
 
     if isinstance(msg.content, str):
         if _is_placeholder_text(msg.content):
-            return {
-                "message": {"role": Constants.ROLE_ASSISTANT, "content": None},
-                "extra_tool_messages": [],
-            }
+            return _empty_assistant_result()
         return {
             "message": {"role": Constants.ROLE_ASSISTANT, "content": msg.content},
             "extra_tool_messages": [],
         }
 
+    text_parts: List[str] = []
+    tool_calls: List[Dict[str, Any]] = []
+    extra_tool_messages: List[Dict[str, Any]] = []
+
     for block in msg.content:
         btype = _block_type(block)
 
         if btype == Constants.CONTENT_TEXT:
-            if isinstance(block, dict):
-                text = block.get("text", "")
-            else:
-                text = getattr(block, "text", "")
-            # Skip empty/whitespace-only text and known placeholder
-            # strings to avoid triggering LiteLLM's sanitisation which
-            # injects "[System: Empty message content sanitised to
-            # satisfy protocol]".
+            text = _get_block_text(block)
             if text and text.strip() and not _is_placeholder_text(text):
                 text_parts.append(text)
 
-        elif btype == Constants.CONTENT_TOOL_USE:
-            if isinstance(block, dict):
-                block_id = block.get("id", "")
-                block_name = block.get("name", "")
-                block_input = block.get("input", {})
-            else:
-                block_id = getattr(block, "id", "")
-                block_name = getattr(block, "name", "")
-                block_input = getattr(block, "input", {})
-            tool_calls.append(
-                {
-                    "id": block_id,
-                    "type": Constants.TOOL_FUNCTION,
-                    Constants.TOOL_FUNCTION: {
-                        "name": block_name,
-                        "arguments": json.dumps(block_input, ensure_ascii=False),
-                    },
-                }
-            )
-
-        elif btype == Constants.CONTENT_SERVER_TOOL_USE:
-            # server_tool_use blocks (e.g. web_search) — treat like tool_use
-            block_id = block.get("id", "") if isinstance(block, dict) else ""
-            block_name = block.get("name", "") if isinstance(block, dict) else ""
-            block_input = block.get("input", {}) if isinstance(block, dict) else {}
-            tool_calls.append(
-                {
-                    "id": block_id,
-                    "type": Constants.TOOL_FUNCTION,
-                    Constants.TOOL_FUNCTION: {
-                        "name": block_name,
-                        "arguments": json.dumps(block_input, ensure_ascii=False),
-                    },
-                }
-            )
+        elif btype in (Constants.CONTENT_TOOL_USE, Constants.CONTENT_SERVER_TOOL_USE):
+            tool_calls.append(_convert_tool_use_block(block))
 
         elif btype == Constants.CONTENT_WEB_SEARCH_RESULT:
-            # web_search_tool_result — convert to an OpenAI tool message
-            tool_use_id = (
-                block.get("tool_use_id", "") if isinstance(block, dict) else ""
-            )
-            content = block.get("content", []) if isinstance(block, dict) else []
-            # Summarise results as text for the upstream model
-            if isinstance(content, list):
-                result_texts = []
-                for r in content:
-                    if isinstance(r, dict) and r.get("type") == "web_search_result":
-                        title = r.get("title", "")
-                        url = r.get("url", "")
-                        snippet = r.get("encrypted_content", "")
-                        result_texts.append(f"[{title}]({url})\n{snippet}")
-                summary = "\n\n".join(result_texts) if result_texts else "No results"
-            elif (
-                isinstance(content, dict)
-                and content.get("type") == "web_search_tool_result_error"
-            ):
-                summary = f"Search error: {content.get('error_code', 'unknown')}"
-            else:
-                summary = str(content)
-            extra_tool_messages.append(
-                {
-                    "role": Constants.ROLE_TOOL,
-                    "tool_call_id": tool_use_id,
-                    "content": summary,
-                }
-            )
+            extra_tool_messages.append(_convert_web_search_result_block(block))
 
     openai_message: Dict[str, Any] = {"role": Constants.ROLE_ASSISTANT}
-
-    # Set content
-    if text_parts:
-        openai_message["content"] = "".join(text_parts)
-    else:
-        openai_message["content"] = None
-
-    # Set tool calls
+    openai_message["content"] = "".join(text_parts) if text_parts else None
     if tool_calls:
         openai_message["tool_calls"] = tool_calls
 
@@ -386,9 +432,14 @@ def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Tool results + content parsing
+# ---------------------------------------------------------------------------
+
+
 def convert_claude_tool_results(msg: ClaudeMessage) -> List[Dict[str, Any]]:
     """Convert Claude tool results to OpenAI format."""
-    tool_messages = []
+    tool_messages: List[Dict[str, Any]] = []
 
     if isinstance(msg.content, list):
         for block in msg.content:
@@ -400,16 +451,45 @@ def convert_claude_tool_results(msg: ClaudeMessage) -> List[Dict[str, Any]]:
                 else:
                     content_val = getattr(block, "content", None)
                     tool_use_id = getattr(block, "tool_use_id", "")
-                content = parse_tool_result_content(content_val)
                 tool_messages.append(
                     {
                         "role": Constants.ROLE_TOOL,
                         "tool_call_id": tool_use_id,
-                        "content": content,
+                        "content": parse_tool_result_content(content_val),
                     }
                 )
 
     return tool_messages
+
+
+def _safe_json_dumps(obj: Any) -> str:
+    """JSON-serialize *obj*, falling back to str() on failure."""
+    try:
+        return json.dumps(obj, ensure_ascii=False)
+    except Exception:  # pylint: disable=broad-exception-caught
+        return str(obj)
+
+
+def _parse_list_content(content: list) -> str:
+    """Parse a list of content items into a joined string."""
+    result_parts: List[str] = []
+    for item in content:
+        if isinstance(item, dict) and item.get("type") == Constants.CONTENT_TEXT:
+            result_parts.append(item.get("text", ""))
+        elif isinstance(item, str):
+            result_parts.append(item)
+        elif isinstance(item, dict):
+            result_parts.append(
+                item.get("text", "") if "text" in item else _safe_json_dumps(item)
+            )
+    return "\n".join(result_parts).strip()
+
+
+def _parse_dict_content(content: dict) -> str:
+    """Parse a dict content item into a string."""
+    if content.get("type") == Constants.CONTENT_TEXT:
+        return str(content.get("text", ""))
+    return _safe_json_dumps(content)
 
 
 def parse_tool_result_content(content: Any) -> str:
@@ -421,31 +501,12 @@ def parse_tool_result_content(content: Any) -> str:
         return content
 
     if isinstance(content, list):
-        result_parts = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == Constants.CONTENT_TEXT:
-                result_parts.append(item.get("text", ""))
-            elif isinstance(item, str):
-                result_parts.append(item)
-            elif isinstance(item, dict):
-                if "text" in item:
-                    result_parts.append(item.get("text", ""))
-                else:
-                    try:
-                        result_parts.append(json.dumps(item, ensure_ascii=False))
-                    except Exception:
-                        result_parts.append(str(item))
-        return "\n".join(result_parts).strip()
+        return _parse_list_content(content)
 
     if isinstance(content, dict):
-        if content.get("type") == Constants.CONTENT_TEXT:
-            return str(content.get("text", ""))
-        try:
-            return json.dumps(content, ensure_ascii=False)
-        except Exception:
-            return str(content)
+        return _parse_dict_content(content)
 
     try:
         return str(content)
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         return "Unparsable content"

@@ -26,49 +26,55 @@ app.include_router(api_router)
 #   2.  POST /admin/reload   (sends SIGHUP to itself)
 # ---------------------------------------------------------------------------
 
-_server: Optional[uvicorn.Server] = None
-_reload_requested: bool = False
+_server: Optional[uvicorn.Server] = None  # pylint: disable=invalid-name
+_reload_requested: bool = False  # pylint: disable=invalid-name
 
 
-def _sighup_handler(signum: int, frame: Any) -> None:
+def _sighup_handler(signum: int, frame: Any) -> None:  # pylint: disable=unused-argument
     """Handle SIGHUP by requesting a graceful restart."""
-    global _reload_requested
+    global _reload_requested  # pylint: disable=global-statement
     _reload_requested = True
     if _server is not None:
         _server.should_exit = True
 
 
+def _print_help_and_exit() -> None:
+    """Print CLI help text and exit."""
+    print("Claude-to-OpenAI API Proxy v1.0.0")
+    print("")
+    print("Usage: python src/main.py")
+    print("")
+    print("Required environment variables:")
+    print("  OPENAI_API_KEY - Your OpenAI API key")
+    print("")
+    print("Optional environment variables:")
+    print("  ANTHROPIC_API_KEY - Expected Anthropic API key for client validation")
+    print("                      If set, clients must provide this exact API key")
+    print(
+        "  OPENAI_BASE_URL - OpenAI API base URL (default: https://api.openai.com/v1)"
+    )
+    print("  BIG_MODEL - Model for opus requests (default: gpt-4o)")
+    print("  MIDDLE_MODEL - Model for sonnet requests (default: gpt-4o)")
+    print("  SMALL_MODEL - Model for haiku requests (default: gpt-4o-mini)")
+    print("  HOST - Server host (default: 0.0.0.0)")
+    print("  PORT - Server port (default: 8082)")
+    print("  LOG_LEVEL - Logging level (default: WARNING)")
+    print("  MAX_TOKENS_LIMIT - Token limit (default: 4096)")
+    print("  MIN_TOKENS_LIMIT - Minimum token limit (default: 100)")
+    print("  REQUEST_TIMEOUT - Request timeout in seconds (default: 90)")
+    print("")
+    print("Model mapping:")
+    print(f"  Claude haiku models -> {config.small_model}")
+    print(f"  Claude sonnet/opus models -> {config.big_model}")
+    sys.exit(0)
+
+
 def main() -> None:
-    global _server, _reload_requested
+    """Entry point — configure and run the proxy server."""
+    global _server, _reload_requested  # pylint: disable=global-statement
 
     if len(sys.argv) > 1 and sys.argv[1] == "--help":
-        print("Claude-to-OpenAI API Proxy v1.0.0")
-        print("")
-        print("Usage: python src/main.py")
-        print("")
-        print("Required environment variables:")
-        print("  OPENAI_API_KEY - Your OpenAI API key")
-        print("")
-        print("Optional environment variables:")
-        print("  ANTHROPIC_API_KEY - Expected Anthropic API key for client validation")
-        print("                      If set, clients must provide this exact API key")
-        print(
-            "  OPENAI_BASE_URL - OpenAI API base URL (default: https://api.openai.com/v1)"
-        )
-        print("  BIG_MODEL - Model for opus requests (default: gpt-4o)")
-        print("  MIDDLE_MODEL - Model for sonnet requests (default: gpt-4o)")
-        print("  SMALL_MODEL - Model for haiku requests (default: gpt-4o-mini)")
-        print("  HOST - Server host (default: 0.0.0.0)")
-        print("  PORT - Server port (default: 8082)")
-        print("  LOG_LEVEL - Logging level (default: WARNING)")
-        print("  MAX_TOKENS_LIMIT - Token limit (default: 4096)")
-        print("  MIN_TOKENS_LIMIT - Minimum token limit (default: 100)")
-        print("  REQUEST_TIMEOUT - Request timeout in seconds (default: 90)")
-        print("")
-        print("Model mapping:")
-        print(f"  Claude haiku models -> {config.small_model}")
-        print(f"  Claude sonnet/opus models -> {config.big_model}")
-        sys.exit(0)
+        _print_help_and_exit()
 
     # Configuration summary
     print("Claude-to-OpenAI API Proxy v1.0.0")
