@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, Optional, Union
 
 from fastapi import HTTPException
@@ -61,30 +62,78 @@ class OpenAIClient:
             )
         self.active_requests: Dict[str, asyncio.Event] = {}
 
+    # ------------------------------------------------------------------
+    # Shared error handling
+    # ------------------------------------------------------------------
+
+    @asynccontextmanager
+    async def _map_openai_errors(
+        self, request_id: Optional[str] = None
+    ) -> AsyncGenerator[None, None]:
+        """Map OpenAI SDK exceptions to FastAPI HTTPExceptions.
+
+        Also cleans up active request tracking on exit.
+        """
+        try:
+            yield
+        except AuthenticationError as e:
+            logger.error("Upstream AuthenticationError: %s", e)
+            raise HTTPException(
+                status_code=401, detail=self.classify_openai_error(str(e))
+            ) from e
+        except RateLimitError as e:
+            logger.error("Upstream RateLimitError: %s", e)
+            raise HTTPException(
+                status_code=429, detail=self.classify_openai_error(str(e))
+            ) from e
+        except BadRequestError as e:
+            logger.error("Upstream BadRequestError: %s", e)
+            raise HTTPException(
+                status_code=400, detail=self.classify_openai_error(str(e))
+            ) from e
+        except APIError as e:
+            logger.error(
+                "Upstream APIError (%s): %s", getattr(e, "status_code", "unknown"), e
+            )
+            status_code = getattr(e, "status_code", 500)
+            raise HTTPException(
+                status_code=status_code, detail=self.classify_openai_error(str(e))
+            ) from e
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("Unexpected upstream error: %s", e)
+            raise HTTPException(
+                status_code=500, detail=f"Unexpected error: {str(e)}"
+            ) from e
+        finally:
+            if request_id and request_id in self.active_requests:
+                del self.active_requests[request_id]
+
+    # ------------------------------------------------------------------
+    # Chat completion (non-streaming)
+    # ------------------------------------------------------------------
+
     async def create_chat_completion(
         self, request: Dict[str, Any], request_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Send chat completion to OpenAI API with cancellation support."""
-
-        # Create cancellation token if request_id provided
         if request_id:
             cancel_event = asyncio.Event()
             self.active_requests[request_id] = cancel_event
 
-        try:
-            # Create task that can be cancelled
+        async with self._map_openai_errors(request_id):
             completion_task = asyncio.create_task(
                 self.client.chat.completions.create(**request)
             )
 
             if request_id:
-                # Wait for either completion or cancellation
                 cancel_task = asyncio.create_task(cancel_event.wait())
                 done, pending = await asyncio.wait(
-                    [completion_task, cancel_task], return_when=asyncio.FIRST_COMPLETED
+                    [completion_task, cancel_task],
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
 
-                # Cancel pending tasks
                 for task in pending:
                     task.cancel()
                     try:
@@ -92,7 +141,6 @@ class OpenAIClient:
                     except asyncio.CancelledError:
                         pass
 
-                # Check if request was cancelled
                 if cancel_task in done:
                     completion_task.cancel()
                     raise HTTPException(
@@ -103,62 +151,28 @@ class OpenAIClient:
             else:
                 completion = await completion_task
 
-            # Convert to dict format that matches the original interface
             result: Dict[str, Any] = completion.model_dump()
             return result
 
-        except AuthenticationError as e:
-            logger.error(f"Upstream AuthenticationError: {e}")
-            raise HTTPException(
-                status_code=401, detail=self.classify_openai_error(str(e))
-            ) from e
-        except RateLimitError as e:
-            logger.error(f"Upstream RateLimitError: {e}")
-            raise HTTPException(
-                status_code=429, detail=self.classify_openai_error(str(e))
-            ) from e
-        except BadRequestError as e:
-            logger.error(f"Upstream BadRequestError: {e}")
-            raise HTTPException(
-                status_code=400, detail=self.classify_openai_error(str(e))
-            ) from e
-        except APIError as e:
-            logger.error(
-                f"Upstream APIError ({getattr(e, 'status_code', 'unknown')}): {e}"
-            )
-            status_code = getattr(e, "status_code", 500)
-            raise HTTPException(
-                status_code=status_code, detail=self.classify_openai_error(str(e))
-            ) from e
-        except Exception as e:
-            logger.error(f"Unexpected upstream error: {e}")
-            raise HTTPException(
-                status_code=500, detail=f"Unexpected error: {str(e)}"
-            ) from e
-
-        finally:
-            # Clean up active request tracking
-            if request_id and request_id in self.active_requests:
-                del self.active_requests[request_id]
+    # ------------------------------------------------------------------
+    # Chat completion (streaming)
+    # ------------------------------------------------------------------
 
     async def create_chat_completion_stream(
         self, request: Dict[str, Any], request_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """Send streaming chat completion to OpenAI API with cancellation support."""
-
-        # Create cancellation token if request_id provided
         if request_id:
             cancel_event = asyncio.Event()
             self.active_requests[request_id] = cancel_event
 
         try:
-            # Ensure stream is enabled
             request["stream"] = True
             if "stream_options" not in request:
                 request["stream_options"] = {}
             request["stream_options"]["include_usage"] = True
 
-            # Create the streaming completion with retry for rate limits
+            # Retry for rate limits on connection
             max_retries = config.max_retries
             last_error: Optional[RateLimitError] = None
             streaming_completion = None
@@ -168,104 +182,106 @@ class OpenAIClient:
                         **request
                     )
                     last_error = None
-                    break  # Connection established successfully
+                    break
                 except RateLimitError as e:
                     last_error = e
                     if attempt < max_retries:
-                        backoff = 2 ** (attempt + 1)  # 2s, 4s
+                        backoff = 2 ** (attempt + 1)
                         logger.warning(
-                            f"Upstream rate limited on connect, retry {attempt + 1}/{max_retries} after {backoff}s: {e}"
+                            "Upstream rate limited on connect, retry %d/%d after %ds: %s",
+                            attempt + 1,
+                            max_retries,
+                            backoff,
+                            e,
                         )
                         await asyncio.sleep(backoff)
                     else:
                         logger.error(
-                            f"Upstream RateLimitError after {max_retries} retries: {e}"
+                            "Upstream RateLimitError after %d retries: %s",
+                            max_retries,
+                            e,
                         )
 
             if last_error is not None:
-                raise last_error  # Re-raise to be caught by outer RateLimitError handler
+                raise last_error
 
             async for chunk in streaming_completion:  # type: ignore[union-attr]
-                # Check for cancellation before yielding each chunk
                 if request_id and request_id in self.active_requests:
                     if self.active_requests[request_id].is_set():
                         raise HTTPException(
                             status_code=499, detail="Request cancelled by client"
                         )
 
-                # Convert chunk to SSE format matching original HTTP client format
                 chunk_dict = chunk.model_dump()
                 chunk_json = json.dumps(chunk_dict, ensure_ascii=False)
                 yield f"data: {chunk_json}"
 
-            # Signal end of stream
             yield "data: [DONE]"
 
         except AuthenticationError as e:
-            logger.error(f"Upstream AuthenticationError: {e}")
+            logger.error("Upstream AuthenticationError: %s", e)
             raise HTTPException(
                 status_code=401, detail=self.classify_openai_error(str(e))
             ) from e
         except RateLimitError as e:
-            logger.error(f"Upstream RateLimitError: {e}")
+            logger.error("Upstream RateLimitError: %s", e)
             raise HTTPException(
                 status_code=429, detail=self.classify_openai_error(str(e))
             ) from e
         except BadRequestError as e:
-            logger.error(f"Upstream BadRequestError: {e}")
+            logger.error("Upstream BadRequestError: %s", e)
             raise HTTPException(
                 status_code=400, detail=self.classify_openai_error(str(e))
             ) from e
         except APIError as e:
             logger.error(
-                f"Upstream APIError ({getattr(e, 'status_code', 'unknown')}): {e}"
+                "Upstream APIError (%s): %s", getattr(e, "status_code", "unknown"), e
             )
             status_code = getattr(e, "status_code", 500)
             raise HTTPException(
                 status_code=status_code, detail=self.classify_openai_error(str(e))
             ) from e
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"Unexpected upstream error: {e}")
+            logger.error("Unexpected upstream error: %s", e)
             raise HTTPException(
                 status_code=500, detail=f"Unexpected error: {str(e)}"
             ) from e
 
         finally:
-            # Clean up active request tracking
             if request_id and request_id in self.active_requests:
                 del self.active_requests[request_id]
 
+    # ------------------------------------------------------------------
+    # Error classification
+    # ------------------------------------------------------------------
+
     def classify_openai_error(self, error_detail: Any) -> str:
         """Provide specific error guidance for common OpenAI API issues."""
-        logger.debug(f"Classifying upstream error: {error_detail}")
+        logger.debug("Classifying upstream error: %s", error_detail)
         error_str = str(error_detail).lower()
 
-        # Region/country restrictions
         if (
             "unsupported_country_region_territory" in error_str
             or "country, region, or territory not supported" in error_str
         ):
             return "OpenAI API is not available in your region. Consider using a VPN or Azure OpenAI service."
 
-        # API key issues
         if "invalid_api_key" in error_str or "unauthorized" in error_str:
             return "Invalid API key. Please check your OPENAI_API_KEY configuration."
 
-        # Rate limiting
         if "rate_limit" in error_str or "quota" in error_str:
             return "Rate limit exceeded. Please wait and try again, or upgrade your API plan."
 
-        # Model not found
         if "model" in error_str and (
             "not found" in error_str or "does not exist" in error_str
         ):
             return "Model not found. Please check your BIG_MODEL and SMALL_MODEL configuration."
 
-        # Billing issues
         if "billing" in error_str or "payment" in error_str:
             return "Billing issue. Please check your OpenAI account billing status."
 
-        # Default: return original message
         return str(error_detail)
 
     def cancel_request(self, request_id: str) -> bool:

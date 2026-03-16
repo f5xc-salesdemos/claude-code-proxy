@@ -466,7 +466,7 @@ def _safe_json_dumps(obj: Any) -> str:
     """JSON-serialize *obj*, falling back to str() on failure."""
     try:
         return json.dumps(obj, ensure_ascii=False)
-    except Exception:  # pylint: disable=broad-exception-caught
+    except (TypeError, ValueError):
         return str(obj)
 
 
