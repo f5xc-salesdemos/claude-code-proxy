@@ -14,6 +14,7 @@ from src.api.endpoints import router as api_router
 from src.core.client import OpenAIClient
 from src.core.config import config
 from src.core.model_manager import ModelManager
+from src.middleware import CorrelationIdMiddleware
 from src.services.searxng import SearXNGClient
 
 # ---------------------------------------------------------------------------
@@ -51,6 +52,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(CorrelationIdMiddleware)
 app.include_router(api_router)
 
 # ---------------------------------------------------------------------------
