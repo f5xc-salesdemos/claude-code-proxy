@@ -12,7 +12,7 @@ class TestLoggingConfiguration:
     def test_root_logger_has_handler(self):
         """Root logger should have at least one handler after import."""
         # Import triggers _configure_logging()
-        import src.core.logging  # noqa: F401
+        import src.core.logging  # noqa: F401  # pylint: disable=unused-import
 
         root = logging.getLogger()
         assert len(root.handlers) > 0
@@ -27,7 +27,7 @@ class TestLoggingConfiguration:
 
     def test_uvicorn_loggers_suppressed(self):
         """Uvicorn loggers should be set to WARNING or higher."""
-        import src.core.logging  # noqa: F401
+        import src.core.logging  # noqa: F401  # pylint: disable=unused-import
 
         for name in ["uvicorn", "uvicorn.access", "uvicorn.error"]:
             assert logging.getLogger(name).level >= logging.WARNING
