@@ -1,0 +1,37 @@
+[MAIN]
+# Allow loading third-party modules that aren't installed in CI
+unsafe-load-any-extension=yes
+
+[MESSAGES CONTROL]
+disable=
+    E0401,  # import-error (CI virtualenv false positives)
+    E0611,  # no-name-in-module (openai package internals)
+    E1101,  # no-member (logging.getLogger false positive)
+    W0406,  # import-self (src/core/logging.py intentional)
+    W0613,  # unused-argument (signal handlers, FastAPI deps)
+    W0621,  # redefined-outer-name (logger parameter shadowing)
+    W0718,  # broad-exception-caught (intentional resilience)
+    W1203,  # logging-fstring-interpolation (codebase uses f-strings)
+    C0301,  # line-too-long (enforced by ruff/black at 88 chars)
+    C0415,  # import-outside-toplevel (intentional deferred imports)
+    C1803,  # use-implicit-booleaness-not-comparison (test clarity)
+    R0801,  # duplicate-code (test helpers legitimately similar)
+    R0902,  # too-many-instance-attributes (config dataclass)
+    R0903,  # too-few-public-methods (Pydantic models / constants)
+    R0911,  # too-many-return-statements (converter dispatch)
+    R0913,  # too-many-arguments (converter functions need context)
+    R0914,  # too-many-locals (streaming converters)
+    R0917,  # too-many-positional-arguments (same as R0913)
+    R1702,  # too-many-nested-blocks (streaming protocol parsing)
+    R1705,  # no-else-return (stylistic choice)
+
+[FORMAT]
+max-line-length=120
+
+[DESIGN]
+max-locals=50
+max-branches=40
+max-statements=150
+max-returns=10
+max-nested-blocks=8
+max-args=10

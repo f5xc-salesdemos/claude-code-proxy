@@ -15,18 +15,15 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.13"
 dependencies = [
     "fastapi[standard]>=0.115.11",
     "uvicorn>=0.34.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.22",
     "openai>=1.54.0",
     "httpx>=0.25.0",
 ]
@@ -50,19 +47,20 @@ claude-code-proxy = "src.main:main"
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
-    "black>=23.0.0",
-    "isort>=5.12.0",
+    "black>=26.1.0",
+    "isort>=7.0.0",
     "mypy>=1.0.0",
     "pyinstaller>=6.15.0",
+    "ruff==0.15.0",
 ]
 
 [tool.black]
-line-length = 100
-target-version = ['py38']
+line-length = 88
+target-version = ['py313']
 
 [tool.isort]
 profile = "black"
-line_length = 100
+line_length = 88
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
@@ -73,8 +71,15 @@ markers = [
     "integration: tests requiring a running proxy server at localhost:8082",
 ]
 
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.pylint."messages_control"]
+disable = ["E0401", "E1101", "W1203"]
+
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.13"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

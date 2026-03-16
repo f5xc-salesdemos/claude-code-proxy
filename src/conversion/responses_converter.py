@@ -132,11 +132,17 @@ def _convert_input_items(items: list, messages: List[Dict[str, Any]]) -> None:  
 
         elif item_type == "function_call":
             # Assistant made a tool call — emit as assistant message with tool_calls
-            call_id = item.get("call_id", item.get("id", f"call_{uuid.uuid4().hex[:24]}"))
+            call_id = item.get(
+                "call_id", item.get("id", f"call_{uuid.uuid4().hex[:24]}")
+            )
             name = item.get("name", "")
             arguments = item.get("arguments", "{}")
             if pending_assistant is None:
-                pending_assistant = {"role": "assistant", "content": None, "tool_calls": []}
+                pending_assistant = {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [],
+                }
             elif "tool_calls" not in pending_assistant:
                 pending_assistant["tool_calls"] = []
             pending_assistant["tool_calls"].append(
@@ -155,16 +161,24 @@ def _convert_input_items(items: list, messages: List[Dict[str, Any]]) -> None:  
                 {
                     "role": "tool",
                     "tool_call_id": call_id,
-                    "content": output if isinstance(output, str) else json.dumps(output),
+                    "content": (
+                        output if isinstance(output, str) else json.dumps(output)
+                    ),
                 }
             )
 
         elif item_type in ("local_shell_call",):
             # Treat like function_call
-            call_id = item.get("call_id", item.get("id", f"call_{uuid.uuid4().hex[:24]}"))
+            call_id = item.get(
+                "call_id", item.get("id", f"call_{uuid.uuid4().hex[:24]}")
+            )
             args = json.dumps({"command": item.get("command", [])})
             if pending_assistant is None:
-                pending_assistant = {"role": "assistant", "content": None, "tool_calls": []}
+                pending_assistant = {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [],
+                }
             elif "tool_calls" not in pending_assistant:
                 pending_assistant["tool_calls"] = []
             pending_assistant["tool_calls"].append(
@@ -183,7 +197,9 @@ def _convert_input_items(items: list, messages: List[Dict[str, Any]]) -> None:  
                 {
                     "role": "tool",
                     "tool_call_id": call_id,
-                    "content": output if isinstance(output, str) else json.dumps(output),
+                    "content": (
+                        output if isinstance(output, str) else json.dumps(output)
+                    ),
                 }
             )
 
@@ -197,7 +213,10 @@ def _convert_input_items(items: list, messages: List[Dict[str, Any]]) -> None:  
             if text:
                 _flush_assistant()
                 messages.append(
-                    {"role": "user", "content": text if isinstance(text, str) else json.dumps(text)}
+                    {
+                        "role": "user",
+                        "content": text if isinstance(text, str) else json.dumps(text),
+                    }
                 )
 
     _flush_assistant()
@@ -225,7 +244,9 @@ def build_response_object(openai_response: dict, original_body: dict) -> dict:
                 "id": f"msg_{uuid.uuid4().hex[:24]}",
                 "role": "assistant",
                 "status": "completed",
-                "content": [{"type": "output_text", "text": text_content, "annotations": []}],
+                "content": [
+                    {"type": "output_text", "text": text_content, "annotations": []}
+                ],
             }
         )
 
@@ -389,7 +410,11 @@ async def stream_responses_from_chat_completions(
                                 "item_id": msg_id,
                                 "output_index": text_content_index,
                                 "content_index": 0,
-                                "part": {"type": "output_text", "text": "", "annotations": []},
+                                "part": {
+                                    "type": "output_text",
+                                    "text": "",
+                                    "annotations": [],
+                                },
                             },
                         )
 
@@ -534,7 +559,9 @@ async def stream_responses_from_chat_completions(
                     "id": msg_id,
                     "role": "assistant",
                     "status": "completed",
-                    "content": [{"type": "output_text", "text": text_buffer, "annotations": []}],
+                    "content": [
+                        {"type": "output_text", "text": text_buffer, "annotations": []}
+                    ],
                 },
             },
         )
@@ -576,7 +603,9 @@ async def stream_responses_from_chat_completions(
                 "id": msg_id,
                 "role": "assistant",
                 "status": "completed",
-                "content": [{"type": "output_text", "text": text_buffer, "annotations": []}],
+                "content": [
+                    {"type": "output_text", "text": text_buffer, "annotations": []}
+                ],
             }
         )
     for tc in tool_calls.values():

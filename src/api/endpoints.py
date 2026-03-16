@@ -1,16 +1,19 @@
+"""API route handlers for the Claude-to-OpenAI proxy."""
+
 import json
 import os
 import signal
+import traceback
 import uuid
 from datetime import datetime
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import Any, AsyncGenerator, Dict, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-
 from src.conversion.request_converter import convert_claude_to_openai
 from src.conversion.response_converter import (
+    _generate_server_tool_id,
     convert_openai_streaming_to_claude_with_cancellation,
     convert_openai_to_claude_response,
 )
@@ -43,11 +46,11 @@ openai_client = OpenAIClient(
 searxng_client = SearXNGClient(config.searxng_url)
 
 # Shared httpx client for pass-through requests
-_httpx_client: Optional[httpx.AsyncClient] = None
+_httpx_client: Optional[httpx.AsyncClient] = None  # pylint: disable=invalid-name
 
 
 def _get_httpx_client() -> httpx.AsyncClient:
-    global _httpx_client
+    global _httpx_client  # pylint: disable=global-statement
     if _httpx_client is None:
         _httpx_client = httpx.AsyncClient(timeout=config.request_timeout)
     return _httpx_client
@@ -77,9 +80,10 @@ async def validate_api_key(
 
     # Validate the client API key
     if not client_api_key or not config.validate_client_api_key(client_api_key):
-        logger.warning(f"Invalid API key provided by client")
+        logger.warning("Invalid API key provided by client")
         raise HTTPException(
-            status_code=401, detail="Invalid API key. Please provide a valid Anthropic API key."
+            status_code=401,
+            detail="Invalid API key. Please provide a valid Anthropic API key.",
         )
 
 
@@ -115,114 +119,154 @@ async def validate_openai_api_key(
     raise HTTPException(status_code=401, detail="Invalid API key.")
 
 
+async def _strip_web_search_if_unavailable(
+    openai_request: Dict[str, Any],
+    web_search_config: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Remove the web_search tool from the request if SearXNG is down.
+
+    Returns the (possibly cleared) web_search_config.
+    """
+    if not web_search_config or await searxng_client.is_available():
+        return web_search_config
+
+    logger.info("SearXNG not available, stripping web_search tool")
+    if "tools" in openai_request:
+        openai_request["tools"] = [
+            t
+            for t in openai_request["tools"]
+            if not (
+                t.get("type") == "function"
+                and t.get("function", {}).get("name") == "web_search"
+            )
+        ]
+        if not openai_request["tools"]:
+            del openai_request["tools"]
+    return None
+
+
+def _handle_streaming_error(exc: HTTPException) -> JSONResponse:
+    """Format an HTTPException into a Claude-style JSON error response."""
+    logger.error(f"Streaming error: {exc.detail}")
+    logger.error(traceback.format_exc())
+    error_message = openai_client.classify_openai_error(exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "type": "error",
+            "error": {"type": "api_error", "message": error_message},
+        },
+    )
+
+
+def _create_streaming_response(
+    openai_request: Dict[str, Any],
+    request: ClaudeMessagesRequest,
+    http_request: Request,
+    request_id: str,
+    web_search_config: Optional[Dict[str, Any]],
+) -> StreamingResponse:
+    """Build a StreamingResponse that proxies the OpenAI stream as Claude SSE."""
+    openai_stream = openai_client.create_chat_completion_stream(
+        openai_request, request_id
+    )
+    return StreamingResponse(
+        convert_openai_streaming_to_claude_with_cancellation(
+            openai_stream,
+            request,
+            logger,
+            http_request,
+            openai_client,
+            request_id,
+            web_search_config=web_search_config,
+            searxng_client=searxng_client if web_search_config else None,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
+
+
+async def _create_non_streaming_response(
+    openai_request: Dict[str, Any],
+    request: ClaudeMessagesRequest,
+    web_search_config: Optional[Dict[str, Any]],
+    request_id: str,
+) -> Any:
+    """Execute a non-streaming OpenAI request and convert to Claude format."""
+    openai_response = await openai_client.create_chat_completion(
+        openai_request, request_id
+    )
+
+    if web_search_config:
+        tool_calls = (
+            openai_response.get("choices", [{}])[0]
+            .get("message", {})
+            .get("tool_calls", [])
+            or []
+        )
+        for tc in tool_calls:
+            func = tc.get("function", {})
+            if func.get("name") == "web_search":
+                try:
+                    args = json.loads(func.get("arguments", "{}"))
+                    query = args.get("query", "")
+                except json.JSONDecodeError:
+                    query = ""
+                if query:
+                    search_result = await searxng_client.search(query)
+                    return _build_non_streaming_web_search_response(
+                        openai_response, request, query, search_result
+                    )
+
+    return convert_openai_to_claude_response(openai_response, request)
+
+
 @router.post("/v1/messages")
 async def create_message(
-    request: ClaudeMessagesRequest, http_request: Request, _: None = Depends(validate_api_key)
+    request: ClaudeMessagesRequest,
+    http_request: Request,
+    _: None = Depends(validate_api_key),
 ) -> Any:
+    """Convert a Claude Messages request and proxy it to OpenAI."""
     try:
-        logger.debug(f"Processing Claude request: model={request.model}, stream={request.stream}")
+        logger.debug(
+            f"Processing Claude request: model={request.model}, stream={request.stream}"
+        )
 
-        # Generate unique request ID for cancellation tracking
         request_id = str(uuid.uuid4())
+        openai_request, web_search_config = convert_claude_to_openai(
+            request, model_manager
+        )
+        web_search_config = await _strip_web_search_if_unavailable(
+            openai_request, web_search_config
+        )
 
-        # Convert Claude request to OpenAI format
-        openai_request, web_search_config = convert_claude_to_openai(request, model_manager)
-
-        # If web_search was requested, check SearXNG availability
-        if web_search_config and not await searxng_client.is_available():
-            logger.info("SearXNG not available, stripping web_search tool")
-            web_search_config = None
-            # Remove the synthetic web_search function tool from the request
-            if "tools" in openai_request:
-                openai_request["tools"] = [
-                    t
-                    for t in openai_request["tools"]
-                    if not (
-                        t.get("type") == "function"
-                        and t.get("function", {}).get("name") == "web_search"
-                    )
-                ]
-                if not openai_request["tools"]:
-                    del openai_request["tools"]
-
-        # Check if client disconnected before processing
         if await http_request.is_disconnected():
             raise HTTPException(status_code=499, detail="Client disconnected")
 
         if request.stream:
-            # Streaming response - wrap in error handling
             try:
-                openai_stream = openai_client.create_chat_completion_stream(
-                    openai_request, request_id
-                )
-                return StreamingResponse(
-                    convert_openai_streaming_to_claude_with_cancellation(
-                        openai_stream,
-                        request,
-                        logger,
-                        http_request,
-                        openai_client,
-                        request_id,
-                        web_search_config=web_search_config,
-                        searxng_client=searxng_client if web_search_config else None,
-                    ),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Headers": "*",
-                    },
+                return _create_streaming_response(
+                    openai_request, request, http_request, request_id, web_search_config
                 )
             except HTTPException as e:
-                # Convert to proper error response for streaming
-                logger.error(f"Streaming error: {e.detail}")
-                import traceback
+                return _handle_streaming_error(e)
 
-                logger.error(traceback.format_exc())
-                error_message = openai_client.classify_openai_error(e.detail)
-                error_response = {
-                    "type": "error",
-                    "error": {"type": "api_error", "message": error_message},
-                }
-                return JSONResponse(status_code=e.status_code, content=error_response)
-        else:
-            # Non-streaming response
-            openai_response = await openai_client.create_chat_completion(openai_request, request_id)
-
-            # Handle web_search interception for non-streaming
-            if web_search_config:
-                tool_calls = (
-                    openai_response.get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
-                    or []
-                )
-                for tc in tool_calls:
-                    func = tc.get("function", {})
-                    if func.get("name") == "web_search":
-                        try:
-                            args = json.loads(func.get("arguments", "{}"))
-                            query = args.get("query", "")
-                        except json.JSONDecodeError:
-                            query = ""
-                        if query:
-                            search_result = await searxng_client.search(query)
-                            # Inject results into the response
-                            # Build a modified response with server_tool_use + result
-                            return _build_non_streaming_web_search_response(
-                                openai_response, request, query, search_result
-                            )
-
-            claude_response = convert_openai_to_claude_response(openai_response, request)
-            return claude_response
+        return await _create_non_streaming_response(
+            openai_request, request, web_search_config, request_id
+        )
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-
         logger.error(f"Unexpected error processing request: {e}")
         logger.error(traceback.format_exc())
         error_message = openai_client.classify_openai_error(str(e))
-        raise HTTPException(status_code=500, detail=error_message)
+        raise HTTPException(status_code=500, detail=error_message) from e
 
 
 def _build_non_streaming_web_search_response(
@@ -232,8 +276,6 @@ def _build_non_streaming_web_search_response(
     search_result: dict,
 ) -> dict:
     """Build a Claude response with web_search server_tool_use + result for non-streaming."""
-    from src.conversion.response_converter import _generate_server_tool_id
-
     message = openai_response.get("choices", [{}])[0].get("message", {})
     content_blocks = []
 
@@ -292,7 +334,9 @@ def _build_non_streaming_web_search_response(
 
 @router.post("/responses")
 @router.post("/v1/responses")
-async def create_response(http_request: Request, _: None = Depends(validate_openai_api_key)) -> Any:
+async def create_response(
+    http_request: Request, _: None = Depends(validate_openai_api_key)
+) -> Any:
     """Translate an OpenAI Responses API request to Chat Completions."""
     try:
         body = await http_request.json()
@@ -308,7 +352,9 @@ async def create_response(http_request: Request, _: None = Depends(validate_open
 
         if cc_request.get("stream"):
             try:
-                openai_stream = openai_client.create_chat_completion_stream(cc_request, request_id)
+                openai_stream = openai_client.create_chat_completion_stream(
+                    cc_request, request_id
+                )
                 return StreamingResponse(
                     stream_responses_from_chat_completions(
                         openai_stream, body, http_request, openai_client, request_id
@@ -328,17 +374,17 @@ async def create_response(http_request: Request, _: None = Depends(validate_open
                     content={"error": {"message": str(e.detail), "type": "api_error"}},
                 )
         else:
-            openai_response = await openai_client.create_chat_completion(cc_request, request_id)
+            openai_response = await openai_client.create_chat_completion(
+                cc_request, request_id
+            )
             return build_response_object(openai_response, body)
 
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-
         logger.error(f"Responses API error: {e}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ============================================================
@@ -368,7 +414,9 @@ async def chat_completions_passthrough(
         client = _get_httpx_client()
 
         if stream:
-            upstream_req = client.build_request("POST", upstream_url, headers=headers, content=body)
+            upstream_req = client.build_request(
+                "POST", upstream_url, headers=headers, content=body
+            )
             upstream_resp = await client.send(upstream_req, stream=True)
             if upstream_resp.status_code != 200:
                 resp_body = await upstream_resp.aread()
@@ -393,18 +441,16 @@ async def chat_completions_passthrough(
                     "Access-Control-Allow-Headers": "*",
                 },
             )
-        else:
-            resp = await client.post(upstream_url, headers=headers, content=body)
-            return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+        resp = await client.post(upstream_url, headers=headers, content=body)
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
 
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-
         logger.error(f"Chat completions pass-through error: {e}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 # ============================================================
@@ -430,13 +476,14 @@ async def list_models(_: None = Depends(validate_openai_api_key)) -> Any:
 
     except Exception as e:
         logger.error(f"Models pass-through error: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @router.post("/v1/messages/count_tokens")
 async def count_tokens(
     request: ClaudeTokenCountRequest, _: None = Depends(validate_api_key)
 ) -> Dict[str, int]:
+    """Estimate input token count for a set of messages."""
     try:
         # For token counting, we'll use a simple estimation
         # In a real implementation, you might want to use tiktoken or similar
@@ -456,7 +503,7 @@ async def count_tokens(
         for msg in request.messages:
             if msg.content is None:
                 continue
-            elif isinstance(msg.content, str):
+            if isinstance(msg.content, str):
                 total_chars += len(msg.content)
             elif isinstance(msg.content, list):
                 for block in msg.content:
@@ -470,7 +517,7 @@ async def count_tokens(
 
     except Exception as e:
         logger.error(f"Error counting tokens: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/health")
@@ -507,7 +554,7 @@ async def test_connection() -> Any:
             "response_id": test_response.get("id", "unknown"),
         }
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error(f"API connectivity test failed: {e}")
         return JSONResponse(
             status_code=503,

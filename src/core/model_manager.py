@@ -1,3 +1,5 @@
+"""Model name mapping between Claude and OpenAI families."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -9,6 +11,8 @@ if TYPE_CHECKING:
 
 
 class ModelManager:
+    """Maps Claude model names to configured OpenAI model names."""
+
     def __init__(self, config: "Config") -> None:
         self.config = config
 
@@ -30,13 +34,12 @@ class ModelManager:
         model_lower = claude_model.lower()
         if "haiku" in model_lower:
             return str(self.config.small_model)
-        elif "sonnet" in model_lower:
+        if "sonnet" in model_lower:
             return str(self.config.middle_model)
-        elif "opus" in model_lower:
+        if "opus" in model_lower:
             return str(self.config.big_model)
-        else:
-            # Default to big model for unknown models
-            return str(self.config.big_model)
+        # Default to big model for unknown models
+        return str(self.config.big_model)
 
 
 model_manager = ModelManager(config)

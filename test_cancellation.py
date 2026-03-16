@@ -5,8 +5,6 @@ This script demonstrates how client disconnection cancels ongoing requests.
 """
 
 import asyncio
-import json
-import time
 
 import httpx
 
@@ -27,7 +25,11 @@ async def test_non_streaming_cancellation():
                         "messages": [
                             {
                                 "role": "user",
-                                "content": "Write a very long story about a journey through space that takes at least 500 words.",
+                                "content": (
+                                    "Write a very long story about a"
+                                    " journey through space that"
+                                    " takes at least 500 words."
+                                ),
                             }
                         ],
                     },
@@ -44,7 +46,7 @@ async def test_non_streaming_cancellation():
             except asyncio.CancelledError:
                 print("✅ Non-streaming request cancelled successfully")
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print(f"❌ Non-streaming test error: {e}")
 
 
@@ -64,7 +66,11 @@ async def test_streaming_cancellation():
                     "messages": [
                         {
                             "role": "user",
-                            "content": "Write a very long story about a journey through space that takes at least 500 words.",
+                            "content": (
+                                "Write a very long story about a"
+                                " journey through space that"
+                                " takes at least 500 words."
+                            ),
                         }
                     ],
                     "stream": True,
@@ -89,7 +95,7 @@ async def test_streaming_cancellation():
                 else:
                     print(f"❌ Streaming request failed: {response.status_code}")
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print(f"❌ Streaming test error: {e}")
 
 
@@ -103,10 +109,9 @@ async def test_server_running():
             if response.status_code == 200:
                 print("✅ Server is running and healthy")
                 return True
-            else:
-                print(f"❌ Server health check failed: {response.status_code}")
-                return False
-    except Exception as e:
+            print(f"❌ Server health check failed: {response.status_code}")
+            return False
+    except Exception as e:  # pylint: disable=broad-exception-caught
         print(f"❌ Cannot connect to server: {e}")
         print("💡 Make sure to start the server with: python start_proxy.py")
         return False

@@ -1,10 +1,12 @@
+"""Convert OpenAI Chat Completions responses to Claude Messages API format."""
+
 import json
 import logging
+import traceback
 import uuid
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from fastapi import HTTPException, Request
-
 from src.core.constants import Constants
 from src.models.claude import ClaudeMessagesRequest
 from src.services.searxng import SearXNGClient
@@ -97,7 +99,9 @@ def convert_openai_to_claude_response(
         "stop_sequence": None,
         "usage": {
             "input_tokens": openai_response.get("usage", {}).get("prompt_tokens", 0),
-            "output_tokens": openai_response.get("usage", {}).get("completion_tokens", 0),
+            "output_tokens": openai_response.get("usage", {}).get(
+                "completion_tokens", 0
+            ),
         },
     }
 
@@ -114,9 +118,29 @@ async def convert_openai_streaming_to_claude(
     message_id = f"msg_{uuid.uuid4().hex[:24]}"
 
     # Send initial SSE events
-    yield f"event: {Constants.EVENT_MESSAGE_START}\ndata: {json.dumps({'type': Constants.EVENT_MESSAGE_START, 'message': {'id': message_id, 'type': 'message', 'role': Constants.ROLE_ASSISTANT, 'model': original_request.model, 'content': [], 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': 0, 'output_tokens': 0}}}, ensure_ascii=False)}\n\n"
+    msg_start = {
+        "type": Constants.EVENT_MESSAGE_START,
+        "message": {
+            "id": message_id,
+            "type": "message",
+            "role": Constants.ROLE_ASSISTANT,
+            "model": original_request.model,
+            "content": [],
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        },
+    }
+    yield (
+        f"event: {Constants.EVENT_MESSAGE_START}\n"
+        f"data: {json.dumps(msg_start, ensure_ascii=False)}\n\n"
+    )
 
-    yield f"event: {Constants.EVENT_PING}\ndata: {json.dumps({'type': Constants.EVENT_PING}, ensure_ascii=False)}\n\n"
+    ping_data = {"type": Constants.EVENT_PING}
+    yield (
+        f"event: {Constants.EVENT_PING}\n"
+        f"data: {json.dumps(ping_data, ensure_ascii=False)}\n\n"
+    )
 
     # Process streaming chunks
     # Defer the text content_block_start until we actually receive text
@@ -144,7 +168,9 @@ async def convert_openai_streaming_to_claude(
                         if not choices:
                             continue
                     except json.JSONDecodeError as e:
-                        logger.warning(f"Failed to parse chunk: {chunk_data}, error: {e}")
+                        logger.warning(
+                            f"Failed to parse chunk: {chunk_data}, error: {e}"
+                        )
                         continue
 
                     choice = choices[0]
@@ -159,9 +185,31 @@ async def convert_openai_streaming_to_claude(
                     # text block that LiteLLM later sanitises.
                     if delta and delta.get("content") and delta["content"].strip():
                         if not text_block_started:
-                            yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': 0, 'content_block': {'type': Constants.CONTENT_TEXT, 'text': ''}}, ensure_ascii=False)}\n\n"
+                            block_data = {
+                                "type": Constants.EVENT_CONTENT_BLOCK_START,
+                                "index": 0,
+                                "content_block": {
+                                    "type": Constants.CONTENT_TEXT,
+                                    "text": "",
+                                },
+                            }
+                            yield (
+                                f"event: {Constants.EVENT_CONTENT_BLOCK_START}\n"
+                                f"data: {json.dumps(block_data, ensure_ascii=False)}\n\n"
+                            )
                             text_block_started = True
-                        yield f"event: {Constants.EVENT_CONTENT_BLOCK_DELTA}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_DELTA, 'index': text_block_index, 'delta': {'type': Constants.DELTA_TEXT, 'text': delta['content']}}, ensure_ascii=False)}\n\n"
+                        delta_data = {
+                            "type": Constants.EVENT_CONTENT_BLOCK_DELTA,
+                            "index": text_block_index,
+                            "delta": {
+                                "type": Constants.DELTA_TEXT,
+                                "text": delta["content"],
+                            },
+                        }
+                        yield (
+                            f"event: {Constants.EVENT_CONTENT_BLOCK_DELTA}\n"
+                            f"data: {json.dumps(delta_data, ensure_ascii=False)}\n\n"
+                        )
 
                     # Handle tool call deltas with improved incremental processing
                     if "tool_calls" in delta:
@@ -191,7 +239,11 @@ async def convert_openai_streaming_to_claude(
                                 tool_call["name"] = function_data["name"]
 
                             # Start content block when we have complete initial data
-                            if tool_call["id"] and tool_call["name"] and not tool_call["started"]:
+                            if (
+                                tool_call["id"]
+                                and tool_call["name"]
+                                and not tool_call["started"]
+                            ):
                                 tool_block_counter += 1
                                 # If no text block was started, tool blocks start at 0
                                 claude_index = (
@@ -202,7 +254,20 @@ async def convert_openai_streaming_to_claude(
                                 tool_call["claude_index"] = claude_index
                                 tool_call["started"] = True
 
-                                yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': claude_index, 'content_block': {'type': Constants.CONTENT_TOOL_USE, 'id': tool_call['id'], 'name': tool_call['name'], 'input': {}}}, ensure_ascii=False)}\n\n"
+                                block_data = {
+                                    "type": Constants.EVENT_CONTENT_BLOCK_START,
+                                    "index": claude_index,
+                                    "content_block": {
+                                        "type": Constants.CONTENT_TOOL_USE,
+                                        "id": tool_call["id"],
+                                        "name": tool_call["name"],
+                                        "input": {},
+                                    },
+                                }
+                                yield (
+                                    f"event: {Constants.EVENT_CONTENT_BLOCK_START}\n"
+                                    f"data: {json.dumps(block_data, ensure_ascii=False)}\n\n"
+                                )
 
                             # Handle function arguments
                             if (
@@ -217,7 +282,20 @@ async def convert_openai_streaming_to_claude(
                                     json.loads(tool_call["args_buffer"])
                                     # If parsing succeeds and we haven't sent this JSON yet
                                     if not tool_call["json_sent"]:
-                                        yield f"event: {Constants.EVENT_CONTENT_BLOCK_DELTA}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_DELTA, 'index': tool_call['claude_index'], 'delta': {'type': Constants.DELTA_INPUT_JSON, 'partial_json': tool_call['args_buffer']}}, ensure_ascii=False)}\n\n"
+                                        delta_data = {
+                                            "type": Constants.EVENT_CONTENT_BLOCK_DELTA,
+                                            "index": tool_call["claude_index"],
+                                            "delta": {
+                                                "type": Constants.DELTA_INPUT_JSON,
+                                                "partial_json": tool_call[
+                                                    "args_buffer"
+                                                ],
+                                            },
+                                        }
+                                        yield (
+                                            f"event: {Constants.EVENT_CONTENT_BLOCK_DELTA}\n"
+                                            f"data: {json.dumps(delta_data, ensure_ascii=False)}\n\n"
+                                        )
                                         tool_call["json_sent"] = True
                                 except json.JSONDecodeError:
                                     # JSON is incomplete, continue accumulating
@@ -238,8 +316,6 @@ async def convert_openai_streaming_to_claude(
     except Exception as e:
         # Handle any streaming errors gracefully
         logger.error(f"Streaming error: {e}")
-        import traceback
-
         logger.error(traceback.format_exc())
         error_event = {
             "type": "error",
@@ -250,15 +326,44 @@ async def convert_openai_streaming_to_claude(
 
     # Send final SSE events — only close the text block if we opened one
     if text_block_started:
-        yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': text_block_index}, ensure_ascii=False)}\n\n"
+        stop_data = {
+            "type": Constants.EVENT_CONTENT_BLOCK_STOP,
+            "index": text_block_index,
+        }
+        yield (
+            f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\n"
+            f"data: {json.dumps(stop_data, ensure_ascii=False)}\n\n"
+        )
 
     for tool_data in current_tool_calls.values():
         if tool_data.get("started") and tool_data.get("claude_index") is not None:
-            yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': tool_data['claude_index']}, ensure_ascii=False)}\n\n"
+            stop_data = {
+                "type": Constants.EVENT_CONTENT_BLOCK_STOP,
+                "index": tool_data["claude_index"],
+            }
+            yield (
+                f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\n"
+                f"data: {json.dumps(stop_data, ensure_ascii=False)}\n\n"
+            )
 
     usage_data = {"input_tokens": 0, "output_tokens": 0}
-    yield f"event: {Constants.EVENT_MESSAGE_DELTA}\ndata: {json.dumps({'type': Constants.EVENT_MESSAGE_DELTA, 'delta': {'stop_reason': final_stop_reason, 'stop_sequence': None}, 'usage': usage_data}, ensure_ascii=False)}\n\n"
-    yield f"event: {Constants.EVENT_MESSAGE_STOP}\ndata: {json.dumps({'type': Constants.EVENT_MESSAGE_STOP}, ensure_ascii=False)}\n\n"
+    msg_delta = {
+        "type": Constants.EVENT_MESSAGE_DELTA,
+        "delta": {
+            "stop_reason": final_stop_reason,
+            "stop_sequence": None,
+        },
+        "usage": usage_data,
+    }
+    yield (
+        f"event: {Constants.EVENT_MESSAGE_DELTA}\n"
+        f"data: {json.dumps(msg_delta, ensure_ascii=False)}\n\n"
+    )
+    msg_stop = {"type": Constants.EVENT_MESSAGE_STOP}
+    yield (
+        f"event: {Constants.EVENT_MESSAGE_STOP}\n"
+        f"data: {json.dumps(msg_stop, ensure_ascii=False)}\n\n"
+    )
 
 
 async def convert_openai_streaming_to_claude_with_cancellation(
@@ -276,9 +381,29 @@ async def convert_openai_streaming_to_claude_with_cancellation(
     message_id = f"msg_{uuid.uuid4().hex[:24]}"
 
     # Send initial SSE events
-    yield f"event: {Constants.EVENT_MESSAGE_START}\ndata: {json.dumps({'type': Constants.EVENT_MESSAGE_START, 'message': {'id': message_id, 'type': 'message', 'role': Constants.ROLE_ASSISTANT, 'model': original_request.model, 'content': [], 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': 0, 'output_tokens': 0}}}, ensure_ascii=False)}\n\n"
+    msg_start = {
+        "type": Constants.EVENT_MESSAGE_START,
+        "message": {
+            "id": message_id,
+            "type": "message",
+            "role": Constants.ROLE_ASSISTANT,
+            "model": original_request.model,
+            "content": [],
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        },
+    }
+    yield (
+        f"event: {Constants.EVENT_MESSAGE_START}\n"
+        f"data: {json.dumps(msg_start, ensure_ascii=False)}\n\n"
+    )
 
-    yield f"event: {Constants.EVENT_PING}\ndata: {json.dumps({'type': Constants.EVENT_PING}, ensure_ascii=False)}\n\n"
+    ping_data = {"type": Constants.EVENT_PING}
+    yield (
+        f"event: {Constants.EVENT_PING}\n"
+        f"data: {json.dumps(ping_data, ensure_ascii=False)}\n\n"
+    )
 
     # Process streaming chunks — defer text content_block_start until we
     # actually receive text.  Avoids triggering LiteLLM's empty-message
@@ -311,7 +436,9 @@ async def convert_openai_streaming_to_claude_with_cancellation(
                         usage = chunk.get("usage", None)
                         if usage:
                             cache_read_input_tokens = 0
-                            prompt_tokens_details = usage.get("prompt_tokens_details", {})
+                            prompt_tokens_details = usage.get(
+                                "prompt_tokens_details", {}
+                            )
                             if prompt_tokens_details:
                                 cache_read_input_tokens = prompt_tokens_details.get(
                                     "cached_tokens", 0
@@ -325,7 +452,9 @@ async def convert_openai_streaming_to_claude_with_cancellation(
                         if not choices:
                             continue
                     except json.JSONDecodeError as e:
-                        logger.warning(f"Failed to parse chunk: {chunk_data}, error: {e}")
+                        logger.warning(
+                            f"Failed to parse chunk: {chunk_data}, error: {e}"
+                        )
                         continue
 
                     choice = choices[0]
@@ -340,9 +469,31 @@ async def convert_openai_streaming_to_claude_with_cancellation(
                     # text block that LiteLLM later sanitises.
                     if delta and delta.get("content") and delta["content"].strip():
                         if not text_block_started:
-                            yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': 0, 'content_block': {'type': Constants.CONTENT_TEXT, 'text': ''}}, ensure_ascii=False)}\n\n"
+                            block_data = {
+                                "type": Constants.EVENT_CONTENT_BLOCK_START,
+                                "index": 0,
+                                "content_block": {
+                                    "type": Constants.CONTENT_TEXT,
+                                    "text": "",
+                                },
+                            }
+                            yield (
+                                f"event: {Constants.EVENT_CONTENT_BLOCK_START}\n"
+                                f"data: {json.dumps(block_data, ensure_ascii=False)}\n\n"
+                            )
                             text_block_started = True
-                        yield f"event: {Constants.EVENT_CONTENT_BLOCK_DELTA}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_DELTA, 'index': text_block_index, 'delta': {'type': Constants.DELTA_TEXT, 'text': delta['content']}}, ensure_ascii=False)}\n\n"
+                        delta_data = {
+                            "type": Constants.EVENT_CONTENT_BLOCK_DELTA,
+                            "index": text_block_index,
+                            "delta": {
+                                "type": Constants.DELTA_TEXT,
+                                "text": delta["content"],
+                            },
+                        }
+                        yield (
+                            f"event: {Constants.EVENT_CONTENT_BLOCK_DELTA}\n"
+                            f"data: {json.dumps(delta_data, ensure_ascii=False)}\n\n"
+                        )
 
                     # Handle tool call deltas with improved incremental processing
                     if "tool_calls" in delta and delta["tool_calls"]:
@@ -371,11 +522,18 @@ async def convert_openai_streaming_to_claude_with_cancellation(
                             function_data = tc_delta.get(Constants.TOOL_FUNCTION, {})
                             if function_data.get("name"):
                                 tool_call["name"] = function_data["name"]
-                                if function_data["name"] == "web_search" and web_search_config:
+                                if (
+                                    function_data["name"] == "web_search"
+                                    and web_search_config
+                                ):
                                     tool_call["is_web_search"] = True
 
                             # Start content block when we have complete initial data
-                            if tool_call["id"] and tool_call["name"] and not tool_call["started"]:
+                            if (
+                                tool_call["id"]
+                                and tool_call["name"]
+                                and not tool_call["started"]
+                            ):
                                 tool_block_counter += 1
                                 # If no text block was started, tool blocks start at 0
                                 claude_index = (
@@ -390,9 +548,34 @@ async def convert_openai_streaming_to_claude_with_cancellation(
                                     # Emit server_tool_use block for web search
                                     server_tool_id = _generate_server_tool_id()
                                     tool_call["server_tool_id"] = server_tool_id
-                                    yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': claude_index, 'content_block': {'type': Constants.CONTENT_SERVER_TOOL_USE, 'id': server_tool_id, 'name': 'web_search'}}, ensure_ascii=False)}\n\n"
+                                    block_data = {
+                                        "type": Constants.EVENT_CONTENT_BLOCK_START,
+                                        "index": claude_index,
+                                        "content_block": {
+                                            "type": Constants.CONTENT_SERVER_TOOL_USE,
+                                            "id": server_tool_id,
+                                            "name": "web_search",
+                                        },
+                                    }
+                                    yield (
+                                        f"event: {Constants.EVENT_CONTENT_BLOCK_START}\n"
+                                        f"data: {json.dumps(block_data, ensure_ascii=False)}\n\n"
+                                    )
                                 else:
-                                    yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': claude_index, 'content_block': {'type': Constants.CONTENT_TOOL_USE, 'id': tool_call['id'], 'name': tool_call['name'], 'input': {}}}, ensure_ascii=False)}\n\n"
+                                    block_data = {
+                                        "type": Constants.EVENT_CONTENT_BLOCK_START,
+                                        "index": claude_index,
+                                        "content_block": {
+                                            "type": Constants.CONTENT_TOOL_USE,
+                                            "id": tool_call["id"],
+                                            "name": tool_call["name"],
+                                            "input": {},
+                                        },
+                                    }
+                                    yield (
+                                        f"event: {Constants.EVENT_CONTENT_BLOCK_START}\n"
+                                        f"data: {json.dumps(block_data, ensure_ascii=False)}\n\n"
+                                    )
 
                             # Handle function arguments
                             if (
@@ -407,7 +590,20 @@ async def convert_openai_streaming_to_claude_with_cancellation(
                                     json.loads(tool_call["args_buffer"])
                                     # If parsing succeeds and we haven't sent this JSON yet
                                     if not tool_call["json_sent"]:
-                                        yield f"event: {Constants.EVENT_CONTENT_BLOCK_DELTA}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_DELTA, 'index': tool_call['claude_index'], 'delta': {'type': Constants.DELTA_INPUT_JSON, 'partial_json': tool_call['args_buffer']}}, ensure_ascii=False)}\n\n"
+                                        delta_data = {
+                                            "type": Constants.EVENT_CONTENT_BLOCK_DELTA,
+                                            "index": tool_call["claude_index"],
+                                            "delta": {
+                                                "type": Constants.DELTA_INPUT_JSON,
+                                                "partial_json": tool_call[
+                                                    "args_buffer"
+                                                ],
+                                            },
+                                        }
+                                        yield (
+                                            f"event: {Constants.EVENT_CONTENT_BLOCK_DELTA}\n"
+                                            f"data: {json.dumps(delta_data, ensure_ascii=False)}\n\n"
+                                        )
                                         tool_call["json_sent"] = True
                                 except json.JSONDecodeError:
                                     # JSON is incomplete, continue accumulating
@@ -451,8 +647,6 @@ async def convert_openai_streaming_to_claude_with_cancellation(
     except Exception as e:
         # Handle any streaming errors gracefully
         logger.error(f"Streaming error: {e}")
-        import traceback
-
         logger.error(traceback.format_exc())
         error_event = {
             "type": "error",
@@ -463,7 +657,14 @@ async def convert_openai_streaming_to_claude_with_cancellation(
 
     # Close the text block only if we opened one
     if text_block_started:
-        yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': text_block_index}, ensure_ascii=False)}\n\n"
+        stop_data = {
+            "type": Constants.EVENT_CONTENT_BLOCK_STOP,
+            "index": text_block_index,
+        }
+        yield (
+            f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\n"
+            f"data: {json.dumps(stop_data, ensure_ascii=False)}\n\n"
+        )
 
     # Close tool call blocks and handle web_search interception
     for tool_data in current_tool_calls.values():
@@ -471,7 +672,14 @@ async def convert_openai_streaming_to_claude_with_cancellation(
             continue
 
         # Close the tool call content block (server_tool_use or tool_use)
-        yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': tool_data['claude_index']}, ensure_ascii=False)}\n\n"
+        stop_data = {
+            "type": Constants.EVENT_CONTENT_BLOCK_STOP,
+            "index": tool_data["claude_index"],
+        }
+        yield (
+            f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\n"
+            f"data: {json.dumps(stop_data, ensure_ascii=False)}\n\n"
+        )
 
         # For web_search calls, execute search and emit result block
         if tool_data.get("is_web_search") and searxng_client is not None:
@@ -501,8 +709,27 @@ async def convert_openai_streaming_to_claude_with_cancellation(
             )
             server_tool_id = tool_data.get("server_tool_id", _generate_server_tool_id())
 
-            yield f"event: {Constants.EVENT_CONTENT_BLOCK_START}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_START, 'index': result_index, 'content_block': {'type': Constants.CONTENT_WEB_SEARCH_RESULT, 'tool_use_id': server_tool_id, 'content': result_content}}, ensure_ascii=False)}\n\n"
-            yield f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\ndata: {json.dumps({'type': Constants.EVENT_CONTENT_BLOCK_STOP, 'index': result_index}, ensure_ascii=False)}\n\n"
+            block_data = {
+                "type": Constants.EVENT_CONTENT_BLOCK_START,
+                "index": result_index,
+                "content_block": {
+                    "type": Constants.CONTENT_WEB_SEARCH_RESULT,
+                    "tool_use_id": server_tool_id,
+                    "content": result_content,
+                },
+            }
+            yield (
+                f"event: {Constants.EVENT_CONTENT_BLOCK_START}\n"
+                f"data: {json.dumps(block_data, ensure_ascii=False)}\n\n"
+            )
+            stop_data = {
+                "type": Constants.EVENT_CONTENT_BLOCK_STOP,
+                "index": result_index,
+            }
+            yield (
+                f"event: {Constants.EVENT_CONTENT_BLOCK_STOP}\n"
+                f"data: {json.dumps(stop_data, ensure_ascii=False)}\n\n"
+            )
 
             # Override stop reason — model made a tool call but we fulfilled it
             # so Claude Code should see end_turn and process the results inline
@@ -512,5 +739,20 @@ async def convert_openai_streaming_to_claude_with_cancellation(
     if web_search_count > 0:
         usage_data["server_tool_use"] = {"web_search_requests": web_search_count}
 
-    yield f"event: {Constants.EVENT_MESSAGE_DELTA}\ndata: {json.dumps({'type': Constants.EVENT_MESSAGE_DELTA, 'delta': {'stop_reason': final_stop_reason, 'stop_sequence': None}, 'usage': usage_data}, ensure_ascii=False)}\n\n"
-    yield f"event: {Constants.EVENT_MESSAGE_STOP}\ndata: {json.dumps({'type': Constants.EVENT_MESSAGE_STOP}, ensure_ascii=False)}\n\n"
+    msg_delta = {
+        "type": Constants.EVENT_MESSAGE_DELTA,
+        "delta": {
+            "stop_reason": final_stop_reason,
+            "stop_sequence": None,
+        },
+        "usage": usage_data,
+    }
+    yield (
+        f"event: {Constants.EVENT_MESSAGE_DELTA}\n"
+        f"data: {json.dumps(msg_delta, ensure_ascii=False)}\n\n"
+    )
+    msg_stop = {"type": Constants.EVENT_MESSAGE_STOP}
+    yield (
+        f"event: {Constants.EVENT_MESSAGE_STOP}\n"
+        f"data: {json.dumps(msg_stop, ensure_ascii=False)}\n\n"
+    )

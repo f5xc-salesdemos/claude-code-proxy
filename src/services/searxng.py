@@ -1,3 +1,5 @@
+"""SearXNG client for server-side web search interception."""
+
 import logging
 import time
 from typing import Any, Dict, List, Optional
@@ -22,6 +24,7 @@ class SearXNGClient:
         self._availability_ttl: float = 60.0
 
     async def is_available(self) -> bool:
+        """Check whether the SearXNG instance is reachable (cached for TTL)."""
         now = time.monotonic()
         if (
             self._available is not None
@@ -31,7 +34,7 @@ class SearXNGClient:
         try:
             resp = await self._client.get(self.base_url, timeout=3.0)
             self._available = resp.status_code < 500
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             self._available = False
         self._available_checked_at = now
         return self._available
@@ -62,7 +65,7 @@ class SearXNGClient:
                     result["page_age"] = str(page_age)
                 results.append(result)
             return {"results": results}
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.warning(f"SearXNG search failed: {e}")
             return {
                 "error": {
@@ -72,4 +75,5 @@ class SearXNGClient:
             }
 
     async def close(self) -> None:
+        """Close the underlying HTTP client."""
         await self._client.aclose()
