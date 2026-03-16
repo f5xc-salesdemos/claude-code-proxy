@@ -51,6 +51,7 @@ dev = [
     "isort>=7.0.0",
     "mypy>=1.0.0",
     "pyinstaller>=6.15.0",
+    "ruff>=0.15.6",
 ]
 
 [tool.black]
@@ -60,6 +61,7 @@ target-version = ['py313']
 [tool.isort]
 profile = "black"
 line_length = 88
+known_first_party = ["src"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
@@ -70,8 +72,15 @@ markers = [
     "integration: tests requiring a running proxy server at localhost:8082",
 ]
 
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.13"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

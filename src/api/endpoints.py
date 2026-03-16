@@ -10,7 +10,6 @@ from typing import Any, AsyncGenerator, Dict, Optional
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-
 from src.conversion.request_converter import convert_claude_to_openai
 from src.conversion.response_converter import (
     convert_openai_streaming_to_claude_with_cancellation,
@@ -124,6 +123,7 @@ async def create_message(
     http_request: Request,
     _: None = Depends(validate_api_key),
 ) -> Any:
+    """Convert a Claude Messages request and proxy it to OpenAI."""
     try:
         logger.debug(
             f"Processing Claude request: model={request.model}, stream={request.stream}"
@@ -460,6 +460,7 @@ async def list_models(_: None = Depends(validate_openai_api_key)) -> Any:
 async def count_tokens(
     request: ClaudeTokenCountRequest, _: None = Depends(validate_api_key)
 ) -> Dict[str, int]:
+    """Estimate input token count for a set of messages."""
     try:
         # For token counting, we'll use a simple estimation
         # In a real implementation, you might want to use tiktoken or similar

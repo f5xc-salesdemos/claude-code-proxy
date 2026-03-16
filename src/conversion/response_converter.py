@@ -6,7 +6,6 @@ import uuid
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from fastapi import HTTPException, Request
-
 from src.core.constants import Constants
 from src.models.claude import ClaudeMessagesRequest
 from src.services.searxng import SearXNGClient

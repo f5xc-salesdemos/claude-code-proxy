@@ -7,7 +7,6 @@ from typing import Any, Optional
 
 import uvicorn
 from fastapi import FastAPI
-
 from src.api.endpoints import router as api_router
 from src.core.config import config
 
