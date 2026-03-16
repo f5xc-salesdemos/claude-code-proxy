@@ -7,6 +7,9 @@ This script demonstrates how client disconnection cancels ongoing requests.
 import asyncio
 
 import httpx
+import pytest
+
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="session")]
 
 
 async def test_non_streaming_cancellation():
