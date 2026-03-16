@@ -136,9 +136,7 @@ class TestStreamingEmptyContentFiltering:
             if et == "content_block_start"
             and d.get("content_block", {}).get("type") == "text"
         ]
-        assert text_block_starts == [], (
-            "Empty string delta should not open a text block"
-        )
+        assert not text_block_starts, "Empty string delta should not open a text block"
 
     @pytest.mark.asyncio
     async def test_empty_string_delta_does_not_produce_text_delta(self):
@@ -622,9 +620,8 @@ class TestFullRoundTrip:
             ],
         )
         result = convert_claude_assistant_message(polluted_msg)
-        assert result["message"]["content"] is None, (
-            "Placeholder text should be stripped from assistant history"
-        )
+        msg_content = result["message"]["content"]
+        assert msg_content is None, "Placeholder text should be stripped"
         assert len(result["message"]["tool_calls"]) == 1
 
     @pytest.mark.asyncio
@@ -667,9 +664,8 @@ class TestStreamingWhitespaceOnlyDelta:
             if et == "content_block_start"
             and d.get("content_block", {}).get("type") == "text"
         ]
-        assert text_block_starts == [], (
-            "Whitespace-only delta should not open a text block"
-        )
+        msg = "Whitespace-only delta should not open a text block"
+        assert text_block_starts == [], msg
 
     @pytest.mark.asyncio
     async def test_whitespace_only_delta_filtered_with_cancellation(self):
@@ -883,6 +879,5 @@ class TestCancellationVariantParity:
             if et == "content_block_start"
             and d.get("content_block", {}).get("type") == "text"
         ]
-        assert text_block_starts == [], (
-            "Tool-only stream should not emit text blocks in cancellation variant"
-        )
+        msg = "Tool-only stream should not emit text blocks in cancellation variant"
+        assert text_block_starts == [], msg

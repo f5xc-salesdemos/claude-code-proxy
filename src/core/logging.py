@@ -1,6 +1,7 @@
 """Centralised logging configuration for the proxy."""
 
 import logging
+
 from src.core.config import config
 
 # Parse log level - extract just the first word to handle comments

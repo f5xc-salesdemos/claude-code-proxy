@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 from src.core.config import config
 
 if TYPE_CHECKING:
