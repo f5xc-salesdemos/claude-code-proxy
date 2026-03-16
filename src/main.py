@@ -93,13 +93,8 @@ def main() -> None:
     print(f"   Graceful reload: kill -HUP {os.getpid()}  or  POST /admin/reload")
     print("")
 
-    # Parse log level - extract just the first word to handle comments
-    log_level = config.log_level.split()[0].lower()
-
-    # Validate and set default if invalid
-    valid_levels = ["debug", "info", "warning", "error", "critical"]
-    if log_level not in valid_levels:
-        log_level = "info"
+    # Log level is already validated by BaseSettings
+    log_level = config.log_level.lower()
 
     # Register SIGHUP handler for graceful reload
     signal.signal(signal.SIGHUP, _sighup_handler)

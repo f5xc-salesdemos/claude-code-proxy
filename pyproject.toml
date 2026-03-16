@@ -26,6 +26,7 @@ dependencies = [
     "python-multipart>=0.0.22",
     "openai>=1.54.0",
     "httpx>=0.25.0",
+    "pydantic-settings>=2.0.0",
 ]
 
 [project.optional-dependencies]

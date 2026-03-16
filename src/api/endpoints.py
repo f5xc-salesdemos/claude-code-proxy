@@ -527,7 +527,6 @@ async def health_check() -> Dict[str, Any]:
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "openai_api_configured": bool(config.openai_api_key),
-        "api_key_valid": config.validate_api_key(),
         "client_api_key_validation": bool(config.anthropic_api_key),
         "searxng_url": config.searxng_url,
     }
