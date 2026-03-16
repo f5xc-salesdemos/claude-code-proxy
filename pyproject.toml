@@ -60,6 +60,7 @@ target-version = ['py313']
 [tool.isort]
 profile = "black"
 line_length = 88
+known_third_party = ["src", "tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
@@ -73,6 +74,9 @@ markers = [
 [tool.ruff]
 line-length = 88
 target-version = "py313"
+
+[tool.ruff.lint]
+ignore = ["I"]
 
 [tool.pylint."messages_control"]
 disable = ["E0401", "E1101", "W1203"]

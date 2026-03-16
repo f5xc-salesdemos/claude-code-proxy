@@ -26,6 +26,8 @@ from src.core.client import OpenAIClient
 from src.core.config import config
 from src.core.logging import logger
 from src.core.model_manager import ModelManager
+from src.core.model_registry import ModelRegistry
+from src.core.tokens import estimate_tokens
 from src.models.claude import ClaudeMessagesRequest, ClaudeTokenCountRequest
 from src.services.search.base import SearchProvider
 
@@ -54,6 +56,9 @@ model_manager = ModelManager(config)
 
 # Search provider for WebSearch interception (set during lifespan)
 search_provider: Optional[SearchProvider] = None  # pylint: disable=invalid-name
+
+# Model registry for context window validation (set during lifespan)
+model_registry: Optional[ModelRegistry] = None  # pylint: disable=invalid-name
 
 # Shared httpx client for pass-through requests
 _httpx_client: Optional[httpx.AsyncClient] = None  # pylint: disable=invalid-name
@@ -272,6 +277,41 @@ async def create_message(
             openai_request, web_search_config
         )
 
+        # Pre-flight context window check
+        if (
+            config.model_registry_enabled
+            and model_registry is not None
+            and request.model is not None
+        ):
+            _limits = model_registry.get_limits(request.model)
+            if _limits is not None:
+                _estimated_input = estimate_tokens(
+                    request.messages,
+                    system=request.system,
+                    tools=request.tools,
+                )
+                _context_limit = int(
+                    _limits.max_input_tokens * config.model_registry_safety_margin
+                )
+                if _estimated_input + request.max_tokens > _context_limit:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "type": "error",
+                            "error": {
+                                "type": "invalid_request_error",
+                                "message": (
+                                    f"Estimated input tokens (~{_estimated_input:,}) plus "
+                                    f"requested output tokens ({request.max_tokens:,}) exceeds "
+                                    f"the context window ({_limits.max_input_tokens:,} × "
+                                    f"{config.model_registry_safety_margin} = {_context_limit:,}) "
+                                    f"for model '{request.model}'. "
+                                    "Reduce your input or lower max_tokens."
+                                ),
+                            },
+                        },
+                    )
+
         if await http_request.is_disconnected():
             raise HTTPException(status_code=499, detail="Client disconnected")
 
@@ -485,7 +525,7 @@ async def chat_completions_passthrough(
 @router.get("/models")
 @router.get("/v1/models")
 async def list_models(_: None = Depends(validate_openai_api_key)) -> Any:
-    """Forward /models request to the upstream server."""
+    """Forward /models request to the upstream server, enriched with Claude aliases."""
     try:
         upstream_url = config.openai_base_url.rstrip("/") + "/models"
         headers = {
@@ -496,7 +536,42 @@ async def list_models(_: None = Depends(validate_openai_api_key)) -> Any:
 
         client = _get_httpx_client()
         resp = await client.get(upstream_url, headers=headers)
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        body = resp.json()
+
+        if resp.status_code == 200 and isinstance(body.get("data"), list):
+            data = body["data"]
+            existing_ids = {m.get("id") for m in data if isinstance(m, dict)}
+
+            if model_registry is not None:
+                # Enrich existing upstream models with context_window
+                for model_entry in data:
+                    if isinstance(model_entry, dict):
+                        mid = model_entry.get("id", "")
+                        limits = model_registry.get_limits(mid)
+                        if limits is not None:
+                            model_entry["context_window"] = limits.max_input_tokens
+
+                # Inject Claude aliases
+                _aliases = [
+                    ("claude-opus", config.big_model),
+                    ("claude-sonnet", config.middle_model),
+                    ("claude-haiku", config.small_model),
+                ]
+                for alias_id, mapped_model in _aliases:
+                    if alias_id in existing_ids or mapped_model is None:
+                        continue
+                    limits = model_registry.get_limits(mapped_model)
+                    entry: Dict[str, Any] = {
+                        "id": alias_id,
+                        "object": "model",
+                        "created": 0,
+                        "owned_by": "anthropic",
+                    }
+                    if limits is not None:
+                        entry["context_window"] = limits.max_input_tokens
+                    data.append(entry)
+
+        return JSONResponse(status_code=resp.status_code, content=body)
 
     except Exception as e:
         logger.error(f"Models pass-through error: {e}")
@@ -509,35 +584,11 @@ async def count_tokens(
 ) -> Dict[str, int]:
     """Estimate input token count for a set of messages."""
     try:
-        # For token counting, we'll use a simple estimation
-        # In a real implementation, you might want to use tiktoken or similar
-
-        total_chars = 0
-
-        # Count system message characters
-        if request.system:
-            if isinstance(request.system, str):
-                total_chars += len(request.system)
-            elif isinstance(request.system, list):
-                for sys_block in request.system:
-                    if hasattr(sys_block, "text"):
-                        total_chars += len(sys_block.text)
-
-        # Count message characters
-        for msg in request.messages:
-            if msg.content is None:
-                continue
-            if isinstance(msg.content, str):
-                total_chars += len(msg.content)
-            elif isinstance(msg.content, list):
-                for block in msg.content:
-                    if hasattr(block, "text") and block.text is not None:
-                        total_chars += len(block.text)
-
-        # Rough estimation: 4 characters per token
-        estimated_tokens = max(1, total_chars // 4)
-
-        return {"input_tokens": estimated_tokens}
+        estimated = estimate_tokens(
+            request.messages,
+            system=request.system,
+        )
+        return {"input_tokens": estimated}
 
     except Exception as e:
         logger.error(f"Error counting tokens: {e}")
