@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from src.conversion.request_converter import convert_claude_to_openai
 from src.conversion.response_converter import (
     _generate_server_tool_id,
-    convert_openai_streaming_to_claude_with_cancellation,
+    convert_openai_streaming_to_claude,
     convert_openai_to_claude_response,
 )
 from src.conversion.responses_converter import (
@@ -30,6 +30,13 @@ from src.models.claude import ClaudeMessagesRequest, ClaudeTokenCountRequest
 from src.services.searxng import SearXNGClient
 
 router = APIRouter()
+
+STREAMING_RESPONSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "*",
+}
 
 # Get custom headers from config
 custom_headers = config.get_custom_headers()
@@ -171,7 +178,7 @@ def _create_streaming_response(
         openai_request, request_id
     )
     return StreamingResponse(
-        convert_openai_streaming_to_claude_with_cancellation(
+        convert_openai_streaming_to_claude(
             openai_stream,
             request,
             logger,
@@ -182,12 +189,7 @@ def _create_streaming_response(
             searxng_client=searxng_client if web_search_config else None,
         ),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "*",
-        },
+        headers=STREAMING_RESPONSE_HEADERS,
     )
 
 
@@ -360,12 +362,7 @@ async def create_response(
                         openai_stream, body, http_request, openai_client, request_id
                     ),
                     media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Headers": "*",
-                    },
+                    headers=STREAMING_RESPONSE_HEADERS,
                 )
             except HTTPException as e:
                 logger.error(f"Responses streaming error: {e.detail}")
@@ -434,12 +431,7 @@ async def chat_completions_passthrough(
             return StreamingResponse(
                 _stream(),
                 media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Headers": "*",
-                },
+                headers=STREAMING_RESPONSE_HEADERS,
             )
 
         resp = await client.post(upstream_url, headers=headers, content=body)
