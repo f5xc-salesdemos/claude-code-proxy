@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from src.core.model_registry import ModelLimits
 
 
@@ -42,7 +41,6 @@ class TestModelsEnrichment:
         monkeypatch.setattr(ep, "_get_httpx_client", lambda: mock_client)
 
         from fastapi.testclient import TestClient
-
         from src.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -82,7 +80,6 @@ class TestModelsEnrichment:
         monkeypatch.setattr(ep, "_get_httpx_client", lambda: mock_client)
 
         from fastapi.testclient import TestClient
-
         from src.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -113,7 +110,6 @@ class TestModelsEnrichment:
         monkeypatch.setattr(ep, "_get_httpx_client", lambda: mock_client)
 
         from fastapi.testclient import TestClient
-
         from src.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -155,7 +151,6 @@ class TestModelsEnrichment:
         monkeypatch.setattr(ep, "_get_httpx_client", lambda: mock_client)
 
         from fastapi.testclient import TestClient
-
         from src.main import app
 
         client = TestClient(app, raise_server_exceptions=False)

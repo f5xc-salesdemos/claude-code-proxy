@@ -11,7 +11,6 @@ from typing import Any, AsyncGenerator, Dict, Optional
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-
 from src.conversion.request_converter import convert_claude_to_openai
 from src.conversion.response_converter import (
     _generate_server_tool_id,

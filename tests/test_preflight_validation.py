@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
-
 from src.core.model_registry import ModelLimits
 
 
