@@ -16,7 +16,6 @@ from src.core.config import config
 from src.core.model_manager import ModelManager
 from src.services.searxng import SearXNGClient
 
-
 # ---------------------------------------------------------------------------
 # Lifespan — create/destroy singletons
 # ---------------------------------------------------------------------------
