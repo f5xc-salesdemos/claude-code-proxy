@@ -1,0 +1,189 @@
+---
+title: Binary Packaging
+description: Package the proxy as a standalone PyInstaller binary
+sidebar:
+  order: 5
+---
+
+## Overview
+
+PyInstaller bundles the proxy and all its dependencies into a standalone
+executable that runs without a Python installation on the target system.
+
+Two output formats are available:
+
+| Format | Output | Size |
+| --- | --- | --- |
+| Directory | `dist/claude-code-proxy/` (executable + `_internal/` folder) | ~55 MB |
+| Single file | `dist/claude-code-proxy-single` | ~24 MB |
+
+## Prerequisites
+
+Install PyInstaller as a dev dependency:
+
+```bash
+uv add --dev pyinstaller
+```
+
+## Building
+
+### Directory Version (development / testing)
+
+```bash
+uv run pyinstaller claude-proxy.spec
+```
+
+### Single-file Version (deployment)
+
+```bash
+uv run pyinstaller --onefile --name claude-code-proxy-single src/main.py
+```
+
+### Custom Configuration
+
+```bash
+# Include specific hidden imports
+uv run pyinstaller --onefile --hidden-import=src.api.endpoints src/main.py
+
+# Include data files
+uv run pyinstaller --onefile --add-data="src:src" src/main.py
+```
+
+## PyInstaller Spec File
+
+The `claude-proxy.spec` file controls the build. Key settings:
+
+```python
+a = Analysis(
+    ['src/main.py'],           # Entry point
+    pathex=['.'],              # Module search path
+    datas=[('src', 'src')],    # Data files to bundle
+    hiddenimports=[
+        'src.api.endpoints',
+        'src.core.config',
+        'src.core.client',
+        'uvicorn.logging',
+        'uvicorn.loops.auto',
+        'fastapi.openapi.utils',
+        'pydantic.v1',
+    ],
+)
+```
+
+If you see `ModuleNotFoundError` at runtime, add the missing module to
+`hiddenimports` and rebuild.
+
+## Cross-Platform Notes
+
+PyInstaller produces a native binary for the platform it runs on. You must
+build on the target OS.
+
+| Platform | Command | Output |
+| --- | --- | --- |
+| Linux | `uv run pyinstaller --onefile src/main.py` | ELF executable |
+| Windows | `pyinstaller --onefile src/main.py` | `.exe` |
+| macOS | `pyinstaller --onefile src/main.py` | Mach-O executable |
+
+## Running the Binary
+
+```bash
+# Directory version
+./dist/claude-code-proxy/claude-code-proxy
+
+# Single-file version
+./dist/claude-code-proxy-single
+```
+
+Pass configuration through environment variables (see
+[Configuration Reference](/claude-code-proxy/configuration/)):
+
+```bash
+OPENAI_API_KEY="sk-your-key" ./dist/claude-code-proxy-single
+```
+
+## systemd Service
+
+Create a unit file for production deployments:
+
+```ini
+[Unit]
+Description=Claude Code Proxy
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/claude-proxy
+EnvironmentFile=/opt/claude-proxy/.env
+ExecStart=/opt/claude-proxy/claude-code-proxy-single
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now claude-proxy
+```
+
+Manage the service:
+
+```bash
+sudo systemctl status claude-proxy
+sudo systemctl restart claude-proxy
+journalctl -u claude-proxy -f
+```
+
+## Docker Binary Deployment
+
+For minimal container images, copy just the binary into an Alpine image:
+
+```dockerfile
+FROM alpine:latest
+RUN apk add --no-cache libstdc++
+COPY claude-code-proxy-single /usr/local/bin/claude-code-proxy
+EXPOSE 8082
+CMD ["claude-code-proxy"]
+```
+
+## Performance Optimization
+
+### Reducing Binary Size
+
+- **UPX compression** (cross-platform):
+  ```bash
+  pyinstaller --onefile --upx-dir=/path/to/upx src/main.py
+  ```
+- **Remove unused dependencies** from `requirements.txt` before building.
+- **Use `--exclude`** to skip large modules you do not need.
+
+### Faster Startup
+
+```bash
+export PYTHONOPTIMIZE=2
+export PYTHONDONTWRITEBYTECODE=1
+```
+
+## Version Management and Rollback
+
+Always keep a backup of the previous binary before deploying a new one:
+
+```bash
+# Backup before deploying
+cp claude-code-proxy-single claude-code-proxy-single.bak
+
+# Rollback if needed
+mv claude-code-proxy-single.bak claude-code-proxy-single
+sudo systemctl restart claude-proxy
+```
+
+A typical update cycle:
+
+1. Build the new binary on your build machine.
+2. Copy it to the server alongside the running version.
+3. Stop the service, swap the binary, start the service.
+4. Verify with `curl http://localhost:8082/health`.

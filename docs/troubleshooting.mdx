@@ -1,0 +1,129 @@
+---
+title: Troubleshooting
+description: Common issues, debugging tips, and testing procedures
+sidebar:
+  order: 6
+---
+
+## Common Issues
+
+### Permission Errors (Binary)
+
+If the binary is not executable:
+
+```bash
+chmod +x claude-code-proxy
+```
+
+### Missing Dependencies (Binary)
+
+If you see `ModuleNotFoundError` when running a PyInstaller binary:
+
+- Add the missing module to the `hiddenimports` list in `claude-proxy.spec`.
+- Rebuild with `uv run pyinstaller claude-proxy.spec`.
+- Check that your PyInstaller version is compatible with your Python version.
+
+### Environment Variables Not Set
+
+Verify that the proxy can see your configuration:
+
+```bash
+env | grep -E "(OPENAI|ANTHROPIC)"
+```
+
+If using a `.env` file, make sure it is in the working directory where the
+proxy starts. The proxy loads `.env` automatically via `python-dotenv`.
+
+### Port Already in Use
+
+If port 8082 is occupied:
+
+```bash
+# Find the process using the port
+lsof -i :8082
+
+# Start the proxy on a different port
+PORT=8083 python start_proxy.py
+```
+
+### Insufficient Memory (Single-file Binary)
+
+The single-file PyInstaller binary decompresses to a temporary directory at
+startup, which requires extra memory. If you are memory-constrained, use
+the directory version instead.
+
+### Region Errors
+
+If you receive `unsupported_country_region_territory` errors from OpenAI:
+
+- Switch to **Azure OpenAI** -- see the
+  [Configuration Reference](/claude-code-proxy/configuration/#azure-openai)
+  for setup details.
+- Alternatively, use a local model with Ollama.
+
+### API Key Validation Failures
+
+If the proxy returns HTTP 401:
+
+- Verify that the `ANTHROPIC_API_KEY` in your `.env` matches the key
+  Claude Code sends in the `x-api-key` header.
+- If you do not need client validation, remove or comment out
+  `ANTHROPIC_API_KEY` from your `.env`.
+
+## Debugging
+
+### Enable Debug Logging
+
+```bash
+LOG_LEVEL=DEBUG python start_proxy.py
+```
+
+This produces detailed output for every request and response conversion.
+
+### Check System Logs (systemd)
+
+```bash
+journalctl -u claude-proxy -f
+```
+
+### Test Upstream Connectivity
+
+The `/test-connection` endpoint sends a minimal request to your upstream
+provider and reports success or failure:
+
+```bash
+curl http://localhost:8082/test-connection
+```
+
+### Health Check
+
+```bash
+curl http://localhost:8082/health
+```
+
+The response includes configuration status, whether the API key is valid,
+whether client validation is enabled, and the SearXNG URL.
+
+## Running Tests
+
+### End-to-end Test Script
+
+```bash
+python src/test_claude_to_openai.py
+```
+
+This sends a real request through the proxy and confirms the full
+request/response pipeline works.
+
+### Unit and Integration Tests
+
+```bash
+uv run pytest tests/ -v
+```
+
+### Lint Check
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+```
