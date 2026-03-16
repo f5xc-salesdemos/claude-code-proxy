@@ -1,0 +1,7 @@
+line-length = 88
+target-version = "py313"
+
+[format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
