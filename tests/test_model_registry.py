@@ -1,6 +1,9 @@
 """Unit tests for ModelRegistry."""
 
-from unittest.mock import MagicMock
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.core.model_registry import ModelLimits, ModelRegistry
 
@@ -40,3 +43,133 @@ class TestModelRegistryDefaults:
             limits = registry.get_limits(model)
             assert limits is not None, f"Expected limits for {model!r}, got None"
             assert isinstance(limits, ModelLimits)
+
+
+def _mock_response(status_code: int = 200, json_data: object = None, raise_on_json: bool = False):
+    """Build a mock httpx.Response."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    if raise_on_json:
+        resp.json.side_effect = json.JSONDecodeError("bad json", "", 0)
+    else:
+        resp.json.return_value = json_data
+    return resp
+
+
+class TestModelRegistryDiscovery:
+    """Test async upstream model discovery."""
+
+    @pytest.mark.asyncio
+    async def test_discovery_valid_response(self):
+        """Valid upstream response updates registry limits."""
+        registry = ModelRegistry(_make_config())
+
+        mock_resp = _mock_response(
+            json_data={
+                "data": [
+                    {
+                        "model_group": "claude-opus-4-6",
+                        "max_input_tokens": 500_000.0,
+                        "max_output_tokens": 64_000.0,
+                    },
+                    {
+                        "model_group": "new-upstream-model",
+                        "max_input_tokens": 300_000.0,
+                        "max_output_tokens": 16_000.0,
+                    },
+                ]
+            }
+        )
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("src.core.model_registry.httpx.AsyncClient", return_value=mock_client):
+            await registry.discover_from_upstream(
+                "https://f5ai.pd.f5net.com/api/v1", "test-key"
+            )
+
+        # Existing model updated
+        limits = registry.get_limits("claude-opus-4-6")
+        assert limits == ModelLimits(500_000, 64_000)
+
+        # New model added
+        limits = registry.get_limits("new-upstream-model")
+        assert limits == ModelLimits(300_000, 16_000)
+
+        # Verify URL construction stripped /v1
+        call_args = mock_client.get.call_args
+        assert call_args[0][0] == "https://f5ai.pd.f5net.com/api/model_group/info"
+
+    @pytest.mark.asyncio
+    async def test_discovery_404_fallback(self):
+        """404 response leaves defaults unchanged."""
+        registry = ModelRegistry(_make_config())
+        original_limits = registry.get_all_models()
+
+        mock_resp = _mock_response(status_code=404)
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("src.core.model_registry.httpx.AsyncClient", return_value=mock_client):
+            await registry.discover_from_upstream(
+                "https://example.com/api/v1", "test-key"
+            )
+
+        assert registry.get_all_models() == original_limits
+
+    @pytest.mark.asyncio
+    async def test_discovery_malformed_json(self):
+        """JSON decode error leaves defaults unchanged."""
+        registry = ModelRegistry(_make_config())
+        original_limits = registry.get_all_models()
+
+        mock_resp = _mock_response(status_code=200, raise_on_json=True)
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("src.core.model_registry.httpx.AsyncClient", return_value=mock_client):
+            await registry.discover_from_upstream(
+                "https://example.com/api/v1", "test-key"
+            )
+
+        assert registry.get_all_models() == original_limits
+
+    @pytest.mark.asyncio
+    async def test_discovery_null_fields(self):
+        """Entries with null max_input_tokens preserve hardcoded defaults."""
+        registry = ModelRegistry(_make_config())
+        original_opus = registry.get_limits("claude-opus-4-6")
+
+        mock_resp = _mock_response(
+            json_data={
+                "data": [
+                    {
+                        "model_group": "claude-opus-4-6",
+                        "max_input_tokens": None,
+                        "max_output_tokens": 64_000.0,
+                    },
+                ]
+            }
+        )
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("src.core.model_registry.httpx.AsyncClient", return_value=mock_client):
+            await registry.discover_from_upstream(
+                "https://example.com/api", "test-key"
+            )
+
+        # Original limits preserved since max_input_tokens was null
+        assert registry.get_limits("claude-opus-4-6") == original_opus
