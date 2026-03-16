@@ -1,5 +1,7 @@
 """FastAPI application and server lifecycle for the Claude-to-OpenAI proxy."""
 
+import asyncio
+import logging
 import os
 import signal
 import sys
@@ -14,12 +16,30 @@ from src.api.endpoints import router as api_router
 from src.core.client import OpenAIClient
 from src.core.config import config
 from src.core.model_manager import ModelManager
+from src.core.model_registry import ModelRegistry
 from src.middleware import CorrelationIdMiddleware
 from src.services.search import get_provider
+
+_logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Lifespan — create/destroy singletons
 # ---------------------------------------------------------------------------
+
+
+async def _refresh_registry_loop(
+    registry: ModelRegistry, interval: int
+) -> None:
+    """Periodically refresh model limits from the upstream server."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await registry.discover_from_upstream(
+                config.openai_base_url, config.openai_api_key
+            )
+            _logger.debug("Model registry refreshed from upstream")
+        except Exception:  # pylint: disable=broad-except
+            _logger.warning("Model registry refresh failed", exc_info=True)
 
 
 @asynccontextmanager
@@ -51,9 +71,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.httpx_client = httpx.AsyncClient(timeout=config.request_timeout)
     app.state.custom_headers = custom_headers
 
+    # Model registry — startup discovery is non-blocking
+    registry = ModelRegistry(config)
+    try:
+        await registry.discover_from_upstream(
+            config.openai_base_url, config.openai_api_key
+        )
+        _logger.info("Model registry initialized from upstream")
+    except Exception:  # pylint: disable=broad-except
+        _logger.warning(
+            "Model registry startup discovery failed — using hardcoded defaults",
+            exc_info=True,
+        )
+    app.state.model_registry = registry
+
+    # Update the module-level registry in endpoints so pre-flight uses it
+    from src.api import endpoints as _ep  # noqa: E402  pylint: disable=import-outside-toplevel
+
+    _ep.model_registry = registry
+
+    # Start periodic refresh
+    refresh_task: Optional[asyncio.Task[None]] = None
+    if config.model_registry_refresh_interval > 0:
+        refresh_task = asyncio.create_task(
+            _refresh_registry_loop(registry, config.model_registry_refresh_interval)
+        )
+
     yield
 
     # Cleanup
+    if refresh_task is not None:
+        refresh_task.cancel()
+        try:
+            await refresh_task
+        except asyncio.CancelledError:
+            pass
     await app.state.httpx_client.aclose()
     if app.state.search_provider is not None:
         await app.state.search_provider.close()

@@ -38,3 +38,8 @@ def get_search_provider(request: Request) -> Optional[SearchProvider]:
 def get_httpx_client(request: Request) -> httpx.AsyncClient:
     """Return the shared httpx client from app.state."""
     return request.app.state.httpx_client  # type: ignore[no-any-return]
+
+
+def get_model_registry(request: Request) -> Any:
+    """Return the ModelRegistry singleton from app.state."""
+    return request.app.state.model_registry
