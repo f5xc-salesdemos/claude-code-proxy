@@ -6,7 +6,6 @@ from src.conversion.responses_converter import (
     convert_responses_to_chat_completions,
 )
 
-
 # ---------------------------------------------------------------------------
 # convert_responses_to_chat_completions
 # ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ class TestSearXNGAvailability:
     async def test_availability_cached_true(self):
         """Availability result is cached within TTL when True."""
         client = SearXNGClient("http://test-searxng:8080")
+        # pylint: disable=protected-access
         client._available = True
         client._available_checked_at = time.monotonic()
         result = await client.is_available()
@@ -23,6 +24,7 @@ class TestSearXNGAvailability:
     async def test_availability_cached_false(self):
         """Availability result is cached within TTL when False."""
         client = SearXNGClient("http://test-searxng:8080")
+        # pylint: disable=protected-access
         client._available = False
         client._available_checked_at = time.monotonic()
         result = await client.is_available()
@@ -32,7 +34,7 @@ class TestSearXNGAvailability:
     async def test_unreachable_host_returns_false(self):
         """Unreachable host returns unavailable."""
         client = SearXNGClient("http://192.0.2.1:9999", timeout=0.1)
-        client._available = None  # Clear cache
+        client._available = None  # pylint: disable=protected-access
         result = await client.is_available()
         assert result is False
 
@@ -69,7 +71,7 @@ class TestSearXNGSearch:
             """Return mock response."""
             return mock_resp
 
-        client._client.get = mock_get  # type: ignore[method-assign]
+        client._client.get = mock_get  # type: ignore[method-assign]  # pylint: disable=protected-access
         result = await client.search("test query", max_results=5)
 
         assert "results" in result
@@ -100,7 +102,7 @@ class TestSearXNGSearch:
             """Return mock response."""
             return mock_resp
 
-        client._client.get = mock_get  # type: ignore[method-assign]
+        client._client.get = mock_get  # type: ignore[method-assign]  # pylint: disable=protected-access
         result = await client.search("test", max_results=3)
         assert len(result["results"]) == 3
 
