@@ -26,6 +26,8 @@ from src.core.client import OpenAIClient
 from src.core.config import config
 from src.core.logging import logger
 from src.core.model_manager import ModelManager
+from src.core.model_registry import ModelRegistry
+from src.core.tokens import estimate_tokens
 from src.models.claude import ClaudeMessagesRequest, ClaudeTokenCountRequest
 from src.services.search.base import SearchProvider
 
@@ -54,6 +56,9 @@ model_manager = ModelManager(config)
 
 # Search provider for WebSearch interception (set during lifespan)
 search_provider: Optional[SearchProvider] = None  # pylint: disable=invalid-name
+
+# Model registry for context window validation (set during lifespan)
+model_registry: Optional[ModelRegistry] = None  # pylint: disable=invalid-name
 
 # Shared httpx client for pass-through requests
 _httpx_client: Optional[httpx.AsyncClient] = None  # pylint: disable=invalid-name
@@ -271,6 +276,38 @@ async def create_message(
         web_search_config = await _strip_web_search_if_unavailable(
             openai_request, web_search_config
         )
+
+        # Pre-flight context window check
+        if config.model_registry_enabled and model_registry is not None:
+            _openai_model = openai_request.get("model", "")
+            _limits = model_registry.get_limits(_openai_model)
+            if _limits is not None:
+                _estimated_input = estimate_tokens(
+                    request.messages,
+                    system=request.system,
+                    tools=request.tools,
+                )
+                _context_limit = int(
+                    _limits.max_input_tokens * config.model_registry_safety_margin
+                )
+                if _estimated_input + request.max_tokens > _context_limit:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "type": "error",
+                            "error": {
+                                "type": "invalid_request_error",
+                                "message": (
+                                    f"Estimated input tokens (~{_estimated_input:,}) plus "
+                                    f"requested output tokens ({request.max_tokens:,}) exceeds "
+                                    f"the context window ({_limits.max_input_tokens:,} × "
+                                    f"{config.model_registry_safety_margin} = {_context_limit:,}) "
+                                    f"for model '{_openai_model}'. "
+                                    "Reduce your input or lower max_tokens."
+                                ),
+                            },
+                        },
+                    )
 
         if await http_request.is_disconnected():
             raise HTTPException(status_code=499, detail="Client disconnected")
