@@ -522,7 +522,7 @@ async def chat_completions_passthrough(
 @router.get("/models")
 @router.get("/v1/models")
 async def list_models(_: None = Depends(validate_openai_api_key)) -> Any:
-    """Forward /models request to the upstream server."""
+    """Forward /models request to the upstream server, enriched with Claude aliases."""
     try:
         upstream_url = config.openai_base_url.rstrip("/") + "/models"
         headers = {
@@ -533,7 +533,41 @@ async def list_models(_: None = Depends(validate_openai_api_key)) -> Any:
 
         client = _get_httpx_client()
         resp = await client.get(upstream_url, headers=headers)
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        body = resp.json()
+
+        if resp.status_code == 200 and isinstance(body.get("data"), list):
+            data = body["data"]
+            existing_ids = {m.get("id") for m in data if isinstance(m, dict)}
+
+            # Enrich existing upstream models with context_window
+            for model_entry in data:
+                if isinstance(model_entry, dict):
+                    mid = model_entry.get("id", "")
+                    limits = model_registry.get_limits(mid)
+                    if limits is not None:
+                        model_entry["context_window"] = limits.max_input_tokens
+
+            # Inject Claude aliases
+            _aliases = [
+                ("claude-opus", config.big_model),
+                ("claude-sonnet", config.middle_model),
+                ("claude-haiku", config.small_model),
+            ]
+            for alias_id, mapped_model in _aliases:
+                if alias_id in existing_ids:
+                    continue
+                limits = model_registry.get_limits(mapped_model)
+                entry: Dict[str, Any] = {
+                    "id": alias_id,
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "anthropic",
+                }
+                if limits is not None:
+                    entry["context_window"] = limits.max_input_tokens
+                data.append(entry)
+
+        return JSONResponse(status_code=resp.status_code, content=body)
 
     except Exception as e:
         logger.error(f"Models pass-through error: {e}")
