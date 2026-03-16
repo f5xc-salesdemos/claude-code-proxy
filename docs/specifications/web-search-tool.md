@@ -16,7 +16,7 @@ loop limit is hit, `stop_reason` is `"pause_turn"`.
 Two versions exist:
 
 | Version | Identifier | Notes |
-|---------|-----------|-------|
+| --------- | ----------- | ------- |
 | v1 | `web_search_20250305` | Basic web search |
 | v2 | `web_search_20260209` | Adds dynamic filtering and `allowed_callers` |
 
@@ -44,7 +44,7 @@ The tool definition sent in the `tools` array:
 ### Tool fields
 
 | Field | Type | Required | Description |
-|-------|------|----------|-------------|
+| ------- | ------ | ---------- | ------------- |
 | `type` | `"web_search_20250305"` \| `"web_search_20260209"` | Yes | Version identifier |
 | `name` | `"web_search"` (literal) | Yes | Must be exactly `"web_search"` |
 | `max_uses` | `int` \| `null` | No | Max search invocations per request |
@@ -57,7 +57,7 @@ The tool definition sent in the `tools` array:
 ### UserLocation
 
 | Field | Type | Required | Description |
-|-------|------|----------|-------------|
+| ------- | ------ | ---------- | ------------- |
 | `type` | `"approximate"` (literal) | Yes | Always `"approximate"` |
 | `city` | `string` \| `null` | No | City name |
 | `region` | `string` \| `null` | No | Region/state name |
@@ -90,7 +90,7 @@ Key differences from `tool_use`:
   `"tool_search_tool_regex"`, `"tool_search_tool_bm25"`
 
 | Field | Type | Description |
-|-------|------|-------------|
+| ------- | ------ | ------------- |
 | `type` | `"server_tool_use"` | Discriminator |
 | `id` | `string` | Unique ID, prefix `srvtoolu_` |
 | `name` | `string` | Server tool name (e.g., `"web_search"`) |
@@ -122,7 +122,7 @@ Key differences from `tool_use`:
 ```
 
 | Field | Type | Description |
-|-------|------|-------------|
+| ------- | ------ | ------------- |
 | `type` | `"web_search_tool_result"` | Discriminator |
 | `tool_use_id` | `string` | References the `server_tool_use` block's `id` |
 | `content` | `WebSearchResult[]` \| `WebSearchToolResultError` | Results array or error object |
@@ -141,7 +141,7 @@ Key differences from `tool_use`:
 ```
 
 | Field | Type | Description |
-|-------|------|-------------|
+| ------- | ------ | ------------- |
 | `type` | `"web_search_result"` | Discriminator |
 | `url` | `string` | Source URL |
 | `title` | `string` | Page title |
@@ -153,7 +153,7 @@ real Anthropic API, this is server-encrypted content that
 enables citations. In our proxy, we populate this field
 with the plaintext search snippet from SearXNG.
 
-### 3d. `web_search_tool_result_error` — Error case
+### 3D. `web_search_tool_result_error` — Error case
 
 ```json
 {
@@ -163,14 +163,14 @@ with the plaintext search snippet from SearXNG.
 ```
 
 | Field | Type | Description |
-|-------|------|-------------|
+| ------- | ------ | ------------- |
 | `type` | `"web_search_tool_result_error"` | Discriminator |
 | `error_code` | `WebSearchToolResultErrorCode` | Error classification |
 
 #### Error codes
 
 | Code | Description |
-|------|-------------|
+| ------ | ------------- |
 | `invalid_tool_input` | Malformed tool input |
 | `unavailable` | Search service temporarily unavailable |
 | `max_uses_exceeded` | Exceeded `max_uses` limit |
@@ -202,7 +202,7 @@ a `citations` array:
 ### Citation fields (`web_search_result_location`)
 
 | Field | Type | Description |
-|-------|------|-------------|
+| ------- | ------ | ------------- |
 | `type` | `"web_search_result_location"` | Discriminator |
 | `url` | `string` | URL of the cited source |
 | `title` | `string` | Title of the cited page |
@@ -403,7 +403,7 @@ The `usage` object in the response includes:
 ## 9. Server Tools vs Client Tools
 
 | Aspect | Client Tool (`tool_use`) | Server Tool (`server_tool_use`) |
-|--------|--------------------------|--------------------------------|
+| -------- | -------------------------- | -------------------------------- |
 | Block type | `"tool_use"` | `"server_tool_use"` |
 | ID prefix | `"toolu_"` | `"srvtoolu_"` |
 | Who executes | Client | Anthropic's server |
@@ -415,7 +415,7 @@ The `usage` object in the response includes:
 ## 10. What Our Proxy Does vs Real Anthropic
 
 | Aspect | Real Anthropic | Our Proxy |
-|--------|---------------|-----------|
+| -------- | --------------- | ----------- |
 | Search backend | Anthropic's internal search | SearXNG |
 | `encrypted_content` | Actually encrypted | Plaintext search snippet |
 | Citations | Full citation support with `encrypted_index` | Not generated |
