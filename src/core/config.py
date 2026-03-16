@@ -36,8 +36,9 @@ class Config(BaseSettings):
     max_tokens_limit: int = 4096
     min_tokens_limit: int = 100
 
-    # SearXNG
-    searxng_url: str = "http://searxng:8080"
+    # Web search
+    search_provider: Optional[str] = None
+    tavily_api_key: Optional[str] = None
 
     # Connection
     request_timeout: int = 90

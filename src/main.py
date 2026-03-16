@@ -15,7 +15,7 @@ from src.core.client import OpenAIClient
 from src.core.config import config
 from src.core.model_manager import ModelManager
 from src.middleware import CorrelationIdMiddleware
-from src.services.searxng import SearXNGClient
+from src.services.search import get_provider
 
 # ---------------------------------------------------------------------------
 # Lifespan — create/destroy singletons
@@ -36,7 +36,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         api_version=config.azure_api_version,
         custom_headers=custom_headers,
     )
-    app.state.searxng_client = SearXNGClient(config.searxng_url)
+    # Initialise the search provider plugin (may be None)
+    search_provider = None
+    if config.search_provider:
+        search_provider = get_provider(config.search_provider)
+    app.state.search_provider = search_provider
+
+    # Wire the search provider into the endpoints module global
+    # (endpoints.py uses a module-level global for backward compat)
+    from src.api import endpoints as _ep  # noqa: PLC0415
+
+    _ep.search_provider = search_provider
+
     app.state.httpx_client = httpx.AsyncClient(timeout=config.request_timeout)
     app.state.custom_headers = custom_headers
 
@@ -44,7 +55,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Cleanup
     await app.state.httpx_client.aclose()
-    await app.state.searxng_client.close()
+    if app.state.search_provider is not None:
+        await app.state.search_provider.close()
 
 
 app = FastAPI(

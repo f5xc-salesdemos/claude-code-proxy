@@ -31,13 +31,28 @@ cp .env.example .env
 | `MIN_TOKENS_LIMIT` | No | `100` | Minimum token floor (avoids errors with thinking models) |
 | `REQUEST_TIMEOUT` | No | `90` | Upstream request timeout in seconds |
 | `MAX_RETRIES` | No | `2` | Number of retries on upstream failures |
-| `SEARXNG_URL` | No | `http://searxng:8080` | URL of a SearXNG instance for web search interception |
+| `SEARCH_PROVIDER` | No | -- | Search provider plugin for web search interception (`tavily`) |
+| `TAVILY_API_KEY` | No | -- | API key for [Tavily](https://tavily.com/) web search |
 
 :::note
 `MAX_TOKENS_LIMIT` is a proxy-side cap on the value sent upstream. Modern
 Claude models support 64k--128k output tokens, but your upstream provider may
 have lower limits.
 :::
+
+## Web Search
+
+To enable web search interception, set `SEARCH_PROVIDER` to a supported
+provider name and provide its API key:
+
+```bash
+SEARCH_PROVIDER="tavily"
+TAVILY_API_KEY="tvly-your-api-key"
+```
+
+When no `SEARCH_PROVIDER` is set, the proxy silently strips `web_search`
+tools from requests so the upstream provider does not receive unsupported
+tool definitions.
 
 ## Provider Examples
 
