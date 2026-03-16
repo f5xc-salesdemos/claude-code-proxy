@@ -1,10 +1,13 @@
+"""Application configuration loaded from environment variables."""
+
 import os
 import sys
 from typing import Dict
 
 
-# Configuration
 class Config:
+    """Proxy configuration sourced from environment variables."""
+
     def __init__(self) -> None:
         openai_api_key = os.environ.get("OPENAI_API_KEY")
         if not openai_api_key:

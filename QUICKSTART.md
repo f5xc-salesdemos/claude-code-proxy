@@ -57,7 +57,7 @@ ANTHROPIC_BASE_URL=http://localhost:8082 claude
 ## 🎯 How It Works
 
 | Your Input | Proxy Action | Result |
-|-----------|--------------|--------|
+| ---------- | ------------ | ------ |
 | Claude Code sends `claude-3-5-sonnet-20241022` | Maps to your `BIG_MODEL` | Uses `gpt-4o` (or whatever you configured) |
 | Claude Code sends `claude-3-5-haiku-20241022` | Maps to your `SMALL_MODEL` | Uses `gpt-4o-mini` (or whatever you configured) |
 

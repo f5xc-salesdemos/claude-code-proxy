@@ -1,3 +1,5 @@
+"""Convert Claude Messages API requests to OpenAI Chat Completions format."""
+
 import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
@@ -243,8 +245,7 @@ def convert_claude_user_message(msg: ClaudeMessage) -> Dict[str, Any]:
 
     if len(openai_content) == 1 and openai_content[0]["type"] == "text":
         return {"role": Constants.ROLE_USER, "content": openai_content[0]["text"]}
-    else:
-        return {"role": Constants.ROLE_USER, "content": openai_content}
+    return {"role": Constants.ROLE_USER, "content": openai_content}
 
 
 def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
@@ -421,7 +422,7 @@ def parse_tool_result_content(content: Any) -> str:
                 else:
                     try:
                         result_parts.append(json.dumps(item, ensure_ascii=False))
-                    except:
+                    except Exception:
                         result_parts.append(str(item))
         return "\n".join(result_parts).strip()
 
@@ -430,10 +431,10 @@ def parse_tool_result_content(content: Any) -> str:
             return str(content.get("text", ""))
         try:
             return json.dumps(content, ensure_ascii=False)
-        except:
+        except Exception:
             return str(content)
 
     try:
         return str(content)
-    except:
-        return "Unparseable content"
+    except Exception:
+        return "Unparsable content"

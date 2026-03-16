@@ -1,3 +1,5 @@
+"""SearXNG client for server-side web search interception."""
+
 import logging
 import time
 from typing import Any, Dict, List, Optional

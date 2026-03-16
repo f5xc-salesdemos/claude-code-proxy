@@ -1,3 +1,5 @@
+"""Async OpenAI / Azure OpenAI client with cancellation and retry support."""
+
 import asyncio
 import json
 import logging
@@ -6,7 +8,6 @@ from typing import Any, AsyncGenerator, Dict, Optional, Union
 from fastapi import HTTPException
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 from openai._exceptions import APIError, AuthenticationError, BadRequestError, RateLimitError
-from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from src.core.config import config
 
@@ -94,20 +95,22 @@ class OpenAIClient:
 
         except AuthenticationError as e:
             logger.error(f"Upstream AuthenticationError: {e}")
-            raise HTTPException(status_code=401, detail=self.classify_openai_error(str(e)))
+            raise HTTPException(status_code=401, detail=self.classify_openai_error(str(e))) from e
         except RateLimitError as e:
             logger.error(f"Upstream RateLimitError: {e}")
-            raise HTTPException(status_code=429, detail=self.classify_openai_error(str(e)))
+            raise HTTPException(status_code=429, detail=self.classify_openai_error(str(e))) from e
         except BadRequestError as e:
             logger.error(f"Upstream BadRequestError: {e}")
-            raise HTTPException(status_code=400, detail=self.classify_openai_error(str(e)))
+            raise HTTPException(status_code=400, detail=self.classify_openai_error(str(e))) from e
         except APIError as e:
             logger.error(f"Upstream APIError ({getattr(e, 'status_code', 'unknown')}): {e}")
             status_code = getattr(e, "status_code", 500)
-            raise HTTPException(status_code=status_code, detail=self.classify_openai_error(str(e)))
+            raise HTTPException(
+                status_code=status_code, detail=self.classify_openai_error(str(e))
+            ) from e
         except Exception as e:
             logger.error(f"Unexpected upstream error: {e}")
-            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}") from e
 
         finally:
             # Clean up active request tracking
@@ -170,20 +173,22 @@ class OpenAIClient:
 
         except AuthenticationError as e:
             logger.error(f"Upstream AuthenticationError: {e}")
-            raise HTTPException(status_code=401, detail=self.classify_openai_error(str(e)))
+            raise HTTPException(status_code=401, detail=self.classify_openai_error(str(e))) from e
         except RateLimitError as e:
             logger.error(f"Upstream RateLimitError: {e}")
-            raise HTTPException(status_code=429, detail=self.classify_openai_error(str(e)))
+            raise HTTPException(status_code=429, detail=self.classify_openai_error(str(e))) from e
         except BadRequestError as e:
             logger.error(f"Upstream BadRequestError: {e}")
-            raise HTTPException(status_code=400, detail=self.classify_openai_error(str(e)))
+            raise HTTPException(status_code=400, detail=self.classify_openai_error(str(e))) from e
         except APIError as e:
             logger.error(f"Upstream APIError ({getattr(e, 'status_code', 'unknown')}): {e}")
             status_code = getattr(e, "status_code", 500)
-            raise HTTPException(status_code=status_code, detail=self.classify_openai_error(str(e)))
+            raise HTTPException(
+                status_code=status_code, detail=self.classify_openai_error(str(e))
+            ) from e
         except Exception as e:
             logger.error(f"Unexpected upstream error: {e}")
-            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}") from e
 
         finally:
             # Clean up active request tracking

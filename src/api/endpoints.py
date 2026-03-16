@@ -1,9 +1,11 @@
+"""API route handlers for the Claude-to-OpenAI proxy."""
+
 import json
 import os
 import signal
 import uuid
 from datetime import datetime
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import Any, AsyncGenerator, Dict, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -222,7 +224,7 @@ async def create_message(
         logger.error(f"Unexpected error processing request: {e}")
         logger.error(traceback.format_exc())
         error_message = openai_client.classify_openai_error(str(e))
-        raise HTTPException(status_code=500, detail=error_message)
+        raise HTTPException(status_code=500, detail=error_message) from e
 
 
 def _build_non_streaming_web_search_response(
@@ -338,7 +340,7 @@ async def create_response(http_request: Request, _: None = Depends(validate_open
 
         logger.error(f"Responses API error: {e}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ============================================================
@@ -404,7 +406,7 @@ async def chat_completions_passthrough(
 
         logger.error(f"Chat completions pass-through error: {e}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 # ============================================================
@@ -430,7 +432,7 @@ async def list_models(_: None = Depends(validate_openai_api_key)) -> Any:
 
     except Exception as e:
         logger.error(f"Models pass-through error: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @router.post("/v1/messages/count_tokens")
@@ -470,7 +472,7 @@ async def count_tokens(
 
     except Exception as e:
         logger.error(f"Error counting tokens: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/health")

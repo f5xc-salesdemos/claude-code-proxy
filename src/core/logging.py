@@ -1,3 +1,5 @@
+"""Centralised logging configuration for the proxy."""
+
 import logging
 
 from src.core.config import config

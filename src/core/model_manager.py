@@ -1,3 +1,5 @@
+"""Model name mapping between Claude and OpenAI families."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -9,6 +11,8 @@ if TYPE_CHECKING:
 
 
 class ModelManager:
+    """Maps Claude model names to configured OpenAI model names."""
+
     def __init__(self, config: "Config") -> None:
         self.config = config
 

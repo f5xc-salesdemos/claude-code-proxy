@@ -1,5 +1,9 @@
-# Constants for better maintainability
+"""Shared string constants used across conversion modules."""
+
+
 class Constants:
+    """Centralised registry of role, content-type, and event literals."""
+
     ROLE_USER = "user"
     ROLE_ASSISTANT = "assistant"
     ROLE_SYSTEM = "system"

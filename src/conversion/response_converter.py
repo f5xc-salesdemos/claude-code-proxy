@@ -1,3 +1,5 @@
+"""Convert OpenAI Chat Completions responses to Claude Messages API format."""
+
 import json
 import logging
 import uuid
