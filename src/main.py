@@ -86,8 +86,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.model_registry = registry
 
     # Update the module-level registry in endpoints so pre-flight uses it
-    from src.api import endpoints as _ep  # noqa: E402  pylint: disable=import-outside-toplevel
-
     _ep.model_registry = registry
 
     # Start periodic refresh

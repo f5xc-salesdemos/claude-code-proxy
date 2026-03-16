@@ -54,6 +54,17 @@ class Config(BaseSettings):
     model_registry_refresh_interval: int = 300
     model_registry_safety_margin: float = 0.95
 
+    @field_validator("model_registry_safety_margin", mode="before")
+    @classmethod
+    def _clamp_safety_margin(cls, v: float) -> float:
+        """Clamp safety margin to (0.0, 1.0]."""
+        v = float(v)
+        if v <= 0.0:
+            return 0.01
+        if v > 1.0:
+            return 1.0
+        return v
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, v: str) -> str:

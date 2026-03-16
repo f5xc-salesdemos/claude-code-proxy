@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
 import os
@@ -34,12 +35,17 @@ _DEFAULT_LIMITS: Dict[str, ModelLimits] = {
 }
 
 
+_FALLBACK_INPUT = 200_000
+_FALLBACK_OUTPUT = 8_192
+
+
 class ModelRegistry:
     """Registry of known model context window limits."""
 
     def __init__(self, config: "Config") -> None:
         self.config = config
         self._limits: Dict[str, ModelLimits] = dict(_DEFAULT_LIMITS)
+        self._lock = asyncio.Lock()
         self._apply_env_overrides()
 
     def _apply_env_overrides(self) -> None:
@@ -68,9 +74,9 @@ class ModelRegistry:
                     self._limits[model_key] = ModelLimits(existing.max_input_tokens, value)
             else:
                 if env_key.startswith(input_prefix):
-                    self._limits[model_key] = ModelLimits(value, 0)
+                    self._limits[model_key] = ModelLimits(value, _FALLBACK_OUTPUT)
                 else:
-                    self._limits[model_key] = ModelLimits(0, value)
+                    self._limits[model_key] = ModelLimits(_FALLBACK_INPUT, value)
 
     def get_limits(self, model_name: str) -> Optional[ModelLimits]:
         """Return ModelLimits for the given model name, or None if unknown."""
@@ -111,22 +117,23 @@ class ModelRegistry:
             logger.warning("Upstream model discovery failed: %s", exc)
             return
 
-        for entry in entries:
-            model_group = entry.get("model_group")
-            max_input = entry.get("max_input_tokens")
-            if model_group is None or max_input is None or max_input <= 0:
-                continue
+        async with self._lock:
+            for entry in entries:
+                model_group = entry.get("model_group")
+                max_input = entry.get("max_input_tokens")
+                if model_group is None or max_input is None or max_input <= 0:
+                    continue
 
-            # Determine max_output_tokens: use upstream value if present,
-            # otherwise preserve existing limit's value (or default to 0).
-            max_output = entry.get("max_output_tokens")
-            if max_output is None:
-                existing = self._limits.get(model_group)
-                max_output = existing.max_output_tokens if existing else 0
+                # Determine max_output_tokens: use upstream value if present,
+                # otherwise preserve existing limit's value (or default to 0).
+                max_output = entry.get("max_output_tokens")
+                if max_output is None:
+                    existing = self._limits.get(model_group)
+                    max_output = existing.max_output_tokens if existing else 0
 
-            self._limits[model_group] = ModelLimits(
-                int(max_input), int(max_output)
-            )
+                self._limits[model_group] = ModelLimits(
+                    int(max_input), int(max_output)
+                )
 
-        # Re-apply env overrides so they remain highest priority after discovery
-        self._apply_env_overrides()
+            # Re-apply env overrides so they remain highest priority after discovery
+            self._apply_env_overrides()
