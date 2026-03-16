@@ -51,7 +51,7 @@ dev = [
     "isort>=7.0.0",
     "mypy>=1.0.0",
     "pyinstaller>=6.15.0",
-    "ruff>=0.15.6",
+    "ruff==0.15.0",
 ]
 
 [tool.black]
