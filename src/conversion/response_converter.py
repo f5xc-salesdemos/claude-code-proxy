@@ -6,6 +6,8 @@ import traceback
 import uuid
 from typing import Any, AsyncGenerator, Dict, Optional
 
+import orjson
+
 from fastapi import HTTPException, Request
 from src.core.constants import Constants
 from src.models.claude import ClaudeMessagesRequest
@@ -26,7 +28,7 @@ def _generate_server_tool_id() -> str:
 
 def _sse_event(event_type: str, data: Dict[str, Any]) -> str:
     """Format a single SSE frame."""
-    return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+    return f"event: {event_type}\ndata: {orjson.dumps(data).decode()}\n\n"
 
 
 def _map_finish_reason(finish_reason: Optional[str]) -> str:
@@ -343,10 +345,11 @@ async def convert_openai_streaming_to_claude(
             web_search_count += 1
             query = ""
             try:
-                args = json.loads(tool_data.get("args_buffer", "{}"))
+                raw_buffer = "".join(tool_data.get("args_buffer", []))
+                args = json.loads(raw_buffer or "{}")
                 query = args.get("query", "")
             except json.JSONDecodeError:
-                query = tool_data.get("args_buffer", "").strip('"')
+                query = "".join(tool_data.get("args_buffer", [])).strip('"')
 
             logger.info("Executing web search for: %s", query)
             # Extract domain filters from web_search_config
@@ -434,7 +437,7 @@ def _handle_tool_delta(
         current_tool_calls[tc_index] = {
             "id": None,
             "name": None,
-            "args_buffer": "",
+            "args_buffer": [],
             "json_sent": False,
             "claude_index": None,
             "started": False,
@@ -504,27 +507,33 @@ def _handle_tool_delta(
         and tool_call["started"]
         and function_data["arguments"] is not None
     ):
-        tool_call["args_buffer"] += function_data["arguments"]
+        tool_call["args_buffer"].append(function_data["arguments"])
 
-        try:
-            json.loads(tool_call["args_buffer"])
-            if not tool_call["json_sent"]:
-                events.append(
-                    _sse_event(
-                        Constants.EVENT_CONTENT_BLOCK_DELTA,
-                        {
-                            "type": Constants.EVENT_CONTENT_BLOCK_DELTA,
-                            "index": tool_call["claude_index"],
-                            "delta": {
-                                "type": Constants.DELTA_INPUT_JSON,
-                                "partial_json": tool_call["args_buffer"],
+        # Fast pre-check: only attempt JSON parse when the buffer looks
+        # like it could be complete (ends with '}' or ']').  This avoids
+        # raising and catching JSONDecodeError on the vast majority of
+        # intermediate chunks — exception construction is expensive.
+        joined = "".join(tool_call["args_buffer"])
+        if joined and joined[-1] in ('}', ']'):
+            try:
+                json.loads(joined)
+                if not tool_call["json_sent"]:
+                    events.append(
+                        _sse_event(
+                            Constants.EVENT_CONTENT_BLOCK_DELTA,
+                            {
+                                "type": Constants.EVENT_CONTENT_BLOCK_DELTA,
+                                "index": tool_call["claude_index"],
+                                "delta": {
+                                    "type": Constants.DELTA_INPUT_JSON,
+                                    "partial_json": joined,
+                                },
                             },
-                        },
+                        )
                     )
-                )
-                tool_call["json_sent"] = True
-        except json.JSONDecodeError:
-            pass
+                    tool_call["json_sent"] = True
+            except json.JSONDecodeError:
+                pass
 
     return events
 

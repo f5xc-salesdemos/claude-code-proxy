@@ -11,6 +11,8 @@ import logging
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+import orjson
+
 from fastapi import HTTPException, Request
 
 logger = logging.getLogger(__name__)
@@ -640,4 +642,4 @@ async def stream_responses_from_chat_completions(
 
 def _sse(event: str, data: dict) -> str:
     """Format a single SSE frame."""
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+    return f"event: {event}\ndata: {orjson.dumps(data).decode()}\n\n"
