@@ -7,7 +7,6 @@ import uuid
 from typing import Any, AsyncGenerator, Dict, Optional
 
 import orjson
-
 from fastapi import HTTPException, Request
 from src.core.constants import Constants
 from src.models.claude import ClaudeMessagesRequest
@@ -514,7 +513,7 @@ def _handle_tool_delta(
         # raising and catching JSONDecodeError on the vast majority of
         # intermediate chunks — exception construction is expensive.
         joined = "".join(tool_call["args_buffer"])
-        if joined and joined[-1] in ('}', ']'):
+        if joined and joined[-1] in ("}", "]"):
             try:
                 json.loads(joined)
                 if not tool_call["json_sent"]:

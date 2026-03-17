@@ -12,7 +12,6 @@ import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import orjson
-
 from fastapi import HTTPException, Request
 
 logger = logging.getLogger(__name__)
