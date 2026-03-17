@@ -86,7 +86,7 @@ class TestModelRegistryDiscovery:
 
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
-        registry._client = mock_client
+        registry._client = mock_client  # pylint: disable=protected-access
 
         await registry.discover_from_upstream(
             "https://f5ai.pd.f5net.com/api/v1", "test-key"
@@ -114,7 +114,7 @@ class TestModelRegistryDiscovery:
 
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
-        registry._client = mock_client
+        registry._client = mock_client  # pylint: disable=protected-access
 
         await registry.discover_from_upstream("https://example.com/api/v1", "test-key")
 
@@ -130,7 +130,7 @@ class TestModelRegistryDiscovery:
 
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
-        registry._client = mock_client
+        registry._client = mock_client  # pylint: disable=protected-access
 
         await registry.discover_from_upstream("https://example.com/api/v1", "test-key")
 
@@ -156,7 +156,7 @@ class TestModelRegistryDiscovery:
 
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
-        registry._client = mock_client
+        registry._client = mock_client  # pylint: disable=protected-access
 
         await registry.discover_from_upstream("https://example.com/api", "test-key")
 
