@@ -1,9 +1,6 @@
----
-title: Binary Packaging
-description: Package the proxy as a standalone PyInstaller binary
-sidebar:
-  order: 5
----
+# Binary Packaging
+
+Package the proxy as a standalone PyInstaller binary.
 
 ## Overview
 
@@ -95,7 +92,7 @@ build on the target OS.
 ```
 
 Pass configuration through environment variables (see
-[Configuration Reference](/claude-code-proxy/configuration/)):
+[Configuration Reference](../configuration.md)):
 
 ```bash
 OPENAI_API_KEY="sk-your-key" ./dist/claude-code-proxy-single

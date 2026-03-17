@@ -1,10 +1,6 @@
----
-title: Configuration Reference
-description: Environment variables, provider examples, and custom headers
-sidebar:
-  label: Configuration
-  order: 2
----
+# Configuration Reference
+
+Environment variables, provider examples, and custom headers.
 
 All configuration is done through environment variables, typically set in a
 `.env` file at the project root. Copy `.env.example` as a starting point:
@@ -34,11 +30,9 @@ cp .env.example .env
 | `SEARCH_PROVIDER` | No | -- | Search provider plugin for web search interception (`tavily`) |
 | `TAVILY_API_KEY` | No | -- | API key for [Tavily](https://tavily.com/) web search |
 
-:::note
-`MAX_TOKENS_LIMIT` is a proxy-side cap on the value sent upstream. Modern
-Claude models support 64k--128k output tokens, but your upstream provider may
-have lower limits.
-:::
+> **Note:** `MAX_TOKENS_LIMIT` is a proxy-side cap on the value sent upstream.
+> Modern Claude models support 64k--128k output tokens, but your upstream
+> provider may have lower limits.
 
 ## Web Search
 
@@ -76,10 +70,8 @@ MIDDLE_MODEL="gpt-4"
 SMALL_MODEL="gpt-35-turbo"
 ```
 
-:::tip
-If you encounter `unsupported_country_region_territory` errors with OpenAI
-direct, Azure OpenAI is a good alternative.
-:::
+> **Tip:** If you encounter `unsupported_country_region_territory` errors with
+> OpenAI direct, Azure OpenAI is a good alternative.
 
 ### Local Models (Ollama)
 

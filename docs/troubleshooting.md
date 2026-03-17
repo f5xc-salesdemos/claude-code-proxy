@@ -1,9 +1,6 @@
----
-title: Troubleshooting
-description: Common issues, debugging tips, and testing procedures
-sidebar:
-  order: 6
----
+# Troubleshooting
+
+Common issues, debugging tips, and testing procedures.
 
 ## Common Issues
 
@@ -57,7 +54,7 @@ the directory version instead.
 If you receive `unsupported_country_region_territory` errors from OpenAI:
 
 - Switch to **Azure OpenAI** -- see the
-  [Configuration Reference](/claude-code-proxy/configuration/#azure-openai)
+  [Configuration Reference](./configuration.md#azure-openai)
   for setup details.
 - Alternatively, use a local model with Ollama.
 

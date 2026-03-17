@@ -12,6 +12,6 @@ Closes #
 
 ## Checklist
 
-- [ ] Linked to a GitHub issue (required — CI will block merge without it)
+- [ ] Linked to a GitHub issue
 - [ ] Tested locally
 - [ ] Follows project conventions

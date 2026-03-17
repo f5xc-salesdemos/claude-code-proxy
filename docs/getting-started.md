@@ -1,9 +1,6 @@
----
-title: Getting Started
-description: Install, configure, and run Claude Code Proxy in minutes
-sidebar:
-  order: 1
----
+# Getting Started
+
+Install, configure, and run Claude Code Proxy in minutes.
 
 ## Prerequisites
 
@@ -40,7 +37,7 @@ SMALL_MODEL="gpt-4o-mini"
 ```
 
 For Azure OpenAI, Ollama, or other providers, see the
-[Configuration Reference](/claude-code-proxy/configuration/).
+[Configuration Reference](./configuration.md).
 
 ## Start the Proxy
 
