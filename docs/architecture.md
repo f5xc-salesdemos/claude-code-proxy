@@ -1,15 +1,12 @@
----
-title: How It Works
-description: Request flow, model mapping, API endpoints, and supported features
-sidebar:
-  order: 3
----
+# How It Works
+
+Request flow, model mapping, API endpoints, and supported features.
 
 ## Request Flow
 
 ```
-Claude Code ──► Proxy (localhost:8082) ──► Upstream OpenAI-compatible API
-     ◄──────────────  ◄──────────────────────
+Claude Code --> Proxy (localhost:8082) --> Upstream OpenAI-compatible API
+     <--------------  <------------------
 ```
 
 1. Claude Code sends a request to the proxy using the Anthropic API format.
@@ -96,8 +93,7 @@ SEARCH_PROVIDER="tavily"
 TAVILY_API_KEY="tvly-your-api-key"
 ```
 
-See the [Configuration Reference](/claude-code-proxy/configuration/) for
-details.
+See the [Configuration Reference](./configuration.md) for details.
 
 ### Adding a New Provider
 

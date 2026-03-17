@@ -1,9 +1,6 @@
----
-title: Deployment
-description: Run the proxy in development or production with Python, Docker, or as a binary
-sidebar:
-  order: 4
----
+# Deployment
+
+Run the proxy in development or production with Python, Docker, or as a binary.
 
 ## Python (Direct)
 
@@ -45,7 +42,7 @@ port 8082 by default.
 
 For environments where Python is not available, the proxy can be packaged
 as a standalone binary with PyInstaller. See the
-[Binary Packaging](/claude-code-proxy/deployment/binary/) guide for the
+[Binary Packaging](./binary.md) guide for the
 full walkthrough.
 
 ## Graceful Reload

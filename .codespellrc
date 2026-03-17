@@ -1,3 +1,0 @@
-[codespell]
-skip = *.json,*/tools/generated/*,vendor/*
-ignore-words-list = aks,datas,hcl,ves
