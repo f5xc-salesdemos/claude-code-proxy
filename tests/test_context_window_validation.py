@@ -15,7 +15,7 @@ Covers gaps identified in the existing test suite:
 import json
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from src.core.config import Config
@@ -217,14 +217,10 @@ class TestDiscoveryEdgeCases:
         )
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client  # pylint: disable=protected-access
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream("https://example.com/api", "key")
+        await registry.discover_from_upstream("https://example.com/api", "key")
 
         # Original limits preserved since max_input_tokens was 0
         assert registry.get_limits("claude-opus-4-6") == original_opus
@@ -248,14 +244,10 @@ class TestDiscoveryEdgeCases:
         )
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client  # pylint: disable=protected-access
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream("https://example.com/api", "key")
+        await registry.discover_from_upstream("https://example.com/api", "key")
 
         assert registry.get_limits("claude-opus-4-6") == original_opus
 
@@ -277,14 +269,10 @@ class TestDiscoveryEdgeCases:
         )
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client  # pylint: disable=protected-access
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream("https://example.com/api", "key")
+        await registry.discover_from_upstream("https://example.com/api", "key")
 
         # No new models should be added
         assert len(registry.get_all_models()) == original_count
@@ -309,14 +297,10 @@ class TestDiscoveryEdgeCases:
         )
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client  # pylint: disable=protected-access
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream("https://example.com/api", "key")
+        await registry.discover_from_upstream("https://example.com/api", "key")
 
         # Env override should win over discovery
         limits = registry.get_limits("claude-opus-4-6")
@@ -342,14 +326,10 @@ class TestDiscoveryEdgeCases:
         )
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client  # pylint: disable=protected-access
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream("https://example.com/api", "key")
+        await registry.discover_from_upstream("https://example.com/api", "key")
 
         limits = registry.get_limits("brand-new-model")
         assert limits is not None
@@ -375,14 +355,10 @@ class TestDiscoveryEdgeCases:
         )
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client  # pylint: disable=protected-access
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream("https://example.com/api", "key")
+        await registry.discover_from_upstream("https://example.com/api", "key")
 
         limits = registry.get_limits("claude-opus-4-6")
         assert limits is not None
@@ -397,14 +373,10 @@ class TestDiscoveryEdgeCases:
         mock_resp = _mock_response(json_data={"data": []})
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client  # pylint: disable=protected-access
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream("https://example.com/api/v1", "key")
+        await registry.discover_from_upstream("https://example.com/api/v1", "key")
 
         call_url = mock_client.get.call_args[0][0]
         assert call_url == "https://example.com/api/model_group/info"
@@ -416,14 +388,10 @@ class TestDiscoveryEdgeCases:
         mock_resp = _mock_response(json_data={"data": []})
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client  # pylint: disable=protected-access
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream("https://example.com/api", "key")
+        await registry.discover_from_upstream("https://example.com/api", "key")
 
         call_url = mock_client.get.call_args[0][0]
         assert call_url == "https://example.com/api/model_group/info"

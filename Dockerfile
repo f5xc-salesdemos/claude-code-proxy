@@ -1,11 +1,15 @@
 FROM ghcr.io/astral-sh/uv:bookworm-slim
 
-# Copy the project into the image
-COPY . /app
-
-# Sync the project into a new environment, asserting the lockfile is up to date
 WORKDIR /app
+
+# Copy only dependency manifests first for better layer caching.
+# The `uv sync` layer is now invalidated only when dependencies change,
+# not on every source file edit (saves 30-60s on typical CI rebuilds).
+COPY pyproject.toml uv.lock ./
 RUN uv sync --locked
+
+# Now copy the full project source
+COPY . /app
 
 # Create non-root user
 RUN groupadd --system appgroup && useradd --system --gid appgroup appuser

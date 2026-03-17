@@ -46,7 +46,12 @@ class ModelRegistry:
         self.config = config
         self._limits: Dict[str, ModelLimits] = dict(_DEFAULT_LIMITS)
         self._lock = asyncio.Lock()
+        self._client: httpx.AsyncClient = httpx.AsyncClient(timeout=10.0)
         self._apply_env_overrides()
+
+    async def close(self) -> None:
+        """Close the persistent httpx client."""
+        await self._client.aclose()
 
     def _apply_env_overrides(self) -> None:
         """Override model limits from ``MODEL_MAX_INPUT_TOKENS_*`` and ``MODEL_MAX_OUTPUT_TOKENS_*`` env vars."""
@@ -104,19 +109,18 @@ class ModelRegistry:
         url = f"{url}/model_group/info"
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(
-                    url,
-                    headers={"Authorization": f"Bearer {api_key}"},
+            resp = await self._client.get(
+                url,
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    "Upstream discovery returned status %d", resp.status_code
                 )
-                if resp.status_code != 200:
-                    logger.warning(
-                        "Upstream discovery returned status %d", resp.status_code
-                    )
-                    return
+                return
 
-                payload = resp.json()
-                entries = payload["data"]
+            payload = resp.json()
+            entries = payload["data"]
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             logger.warning("Upstream model discovery failed: %s", exc)
             return
