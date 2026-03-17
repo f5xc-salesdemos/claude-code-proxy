@@ -1,7 +1,7 @@
 """Unit tests for ModelRegistry."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from src.core.model_registry import ModelLimits, ModelRegistry
@@ -85,16 +85,12 @@ class TestModelRegistryDiscovery:
         )
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream(
-                "https://f5ai.pd.f5net.com/api/v1", "test-key"
-            )
+        await registry.discover_from_upstream(
+            "https://f5ai.pd.f5net.com/api/v1", "test-key"
+        )
 
         # Existing model updated
         limits = registry.get_limits("claude-opus-4-6")
@@ -117,16 +113,10 @@ class TestModelRegistryDiscovery:
         mock_resp = _mock_response(status_code=404)
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream(
-                "https://example.com/api/v1", "test-key"
-            )
+        await registry.discover_from_upstream("https://example.com/api/v1", "test-key")
 
         assert registry.get_all_models() == original_limits
 
@@ -139,16 +129,10 @@ class TestModelRegistryDiscovery:
         mock_resp = _mock_response(status_code=200, raise_on_json=True)
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream(
-                "https://example.com/api/v1", "test-key"
-            )
+        await registry.discover_from_upstream("https://example.com/api/v1", "test-key")
 
         assert registry.get_all_models() == original_limits
 
@@ -171,14 +155,10 @@ class TestModelRegistryDiscovery:
         )
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_resp)
+        registry._client = mock_client
 
-        with patch(
-            "src.core.model_registry.httpx.AsyncClient", return_value=mock_client
-        ):
-            await registry.discover_from_upstream("https://example.com/api", "test-key")
+        await registry.discover_from_upstream("https://example.com/api", "test-key")
 
         # Original limits preserved since max_input_tokens was null
         assert registry.get_limits("claude-opus-4-6") == original_opus

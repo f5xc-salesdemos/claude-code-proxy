@@ -1,5 +1,6 @@
 """API route handlers for the Claude-to-OpenAI proxy."""
 
+import asyncio
 import json
 import os
 import signal
@@ -240,15 +241,20 @@ async def _create_non_streaming_response(
             allowed_domains = web_search_config.get("allowed_domains")
             blocked_domains = web_search_config.get("blocked_domains")
 
-            # Execute all searches
-            search_results: list[tuple[str, dict]] = []
-            for query in web_search_queries:
-                result = await search_provider.search(
-                    query,
-                    allowed_domains=allowed_domains or None,
-                    blocked_domains=blocked_domains or None,
+            # Execute all searches in parallel
+            results = await asyncio.gather(
+                *(
+                    search_provider.search(
+                        q,
+                        allowed_domains=allowed_domains or None,
+                        blocked_domains=blocked_domains or None,
+                    )
+                    for q in web_search_queries
                 )
-                search_results.append((query, result))
+            )
+            search_results: list[tuple[str, dict]] = list(
+                zip(web_search_queries, results)
+            )
 
             return _build_non_streaming_web_search_response(
                 openai_response, request, search_results

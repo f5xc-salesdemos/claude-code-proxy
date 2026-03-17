@@ -102,6 +102,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await refresh_task
         except asyncio.CancelledError:
             pass
+    await registry.close()
     await app.state.httpx_client.aclose()
     if app.state.search_provider is not None:
         await app.state.search_provider.close()
