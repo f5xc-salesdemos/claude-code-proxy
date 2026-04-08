@@ -39,6 +39,7 @@ class Config(BaseSettings):
     # Web search
     search_provider: Optional[str] = None
     tavily_api_key: Optional[str] = None
+    firecrawl_api_url: str = "http://localhost:3002"
 
     # Connection
     request_timeout: int = 90
