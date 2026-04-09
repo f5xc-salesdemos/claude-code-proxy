@@ -31,6 +31,7 @@ from src.core.model_registry import ModelRegistry
 from src.core.tokens import estimate_tokens
 from src.models.claude import ClaudeMessagesRequest, ClaudeTokenCountRequest
 from src.services.search.base import SearchProvider
+from src.services.fetch.firecrawl_fetch import FirecrawlFetchProvider
 
 router = APIRouter()
 
@@ -57,6 +58,9 @@ model_manager = ModelManager(config)
 
 # Search provider for WebSearch interception (set during lifespan)
 search_provider: Optional[SearchProvider] = None  # pylint: disable=invalid-name
+
+# Fetch provider for WebFetch interception
+fetch_provider: Optional[FirecrawlFetchProvider] = None  # pylint: disable=invalid-name
 
 # Model registry for context window validation (set during lifespan)
 model_registry: Optional[ModelRegistry] = None  # pylint: disable=invalid-name
@@ -183,6 +187,7 @@ def _create_streaming_response(
     http_request: Request,
     request_id: str,
     web_search_config: Optional[Dict[str, Any]],
+    web_fetch_config: Optional[Dict[str, Any]] = None,
 ) -> StreamingResponse:
     """Build a StreamingResponse that proxies the OpenAI stream as Claude SSE."""
     openai_stream = openai_client.create_chat_completion_stream(
@@ -198,6 +203,8 @@ def _create_streaming_response(
             request_id,
             web_search_config=web_search_config,
             search_provider=search_provider if web_search_config else None,
+            web_fetch_config=web_fetch_config,
+            fetch_provider=fetch_provider if web_fetch_config else None,
         ),
         media_type="text/event-stream",
         headers=STREAMING_RESPONSE_HEADERS,
@@ -209,20 +216,21 @@ async def _create_non_streaming_response(
     request: ClaudeMessagesRequest,
     web_search_config: Optional[Dict[str, Any]],
     request_id: str,
+    web_fetch_config: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """Execute a non-streaming OpenAI request and convert to Claude format."""
     openai_response = await openai_client.create_chat_completion(
         openai_request, request_id
     )
 
-    if web_search_config and search_provider is not None:
-        tool_calls = (
-            openai_response.get("choices", [{}])[0]
-            .get("message", {})
-            .get("tool_calls", [])
-            or []
-        )
+    tool_calls = (
+        openai_response.get("choices", [{}])[0]
+        .get("message", {})
+        .get("tool_calls", [])
+        or []
+    )
 
+    if web_search_config and search_provider is not None:
         # Accumulate ALL web_search queries from tool_calls
         web_search_queries: list[str] = []
         for tc in tool_calls:
@@ -237,11 +245,9 @@ async def _create_non_streaming_response(
                     web_search_queries.append(query)
 
         if web_search_queries:
-            # Extract domain filters from web_search_config
             allowed_domains = web_search_config.get("allowed_domains")
             blocked_domains = web_search_config.get("blocked_domains")
 
-            # Execute all searches in parallel
             results = await asyncio.gather(
                 *(
                     search_provider.search(
@@ -260,6 +266,42 @@ async def _create_non_streaming_response(
                 openai_response, request, search_results
             )
 
+    if web_fetch_config and fetch_provider is not None:
+        # Accumulate ALL web_fetch URLs from tool_calls
+        fetch_urls: list[str] = []
+        for tc in tool_calls:
+            func = tc.get("function", {})
+            if func.get("name") == "web_fetch":
+                try:
+                    args = json.loads(func.get("arguments", "{}"))
+                    url = args.get("url", "")
+                except json.JSONDecodeError:
+                    url = ""
+                if url:
+                    fetch_urls.append(url)
+
+        if fetch_urls:
+            allowed_domains = web_fetch_config.get("allowed_domains")
+            blocked_domains = web_fetch_config.get("blocked_domains")
+
+            results_fetch = await asyncio.gather(
+                *(
+                    fetch_provider.fetch(
+                        u,
+                        allowed_domains=allowed_domains or None,
+                        blocked_domains=blocked_domains or None,
+                    )
+                    for u in fetch_urls
+                )
+            )
+            fetch_results: list[tuple[str, dict]] = list(
+                zip(fetch_urls, results_fetch)
+            )
+
+            return _build_non_streaming_web_fetch_response(
+                openai_response, request, fetch_results
+            )
+
     return convert_openai_to_claude_response(openai_response, request)
 
 
@@ -276,7 +318,7 @@ async def create_message(
         )
 
         request_id = str(uuid.uuid4())
-        openai_request, web_search_config = convert_claude_to_openai(
+        openai_request, web_search_config, web_fetch_config = convert_claude_to_openai(
             request, model_manager
         )
         web_search_config = await _strip_web_search_if_unavailable(
@@ -324,13 +366,14 @@ async def create_message(
         if request.stream:
             try:
                 return _create_streaming_response(
-                    openai_request, request, http_request, request_id, web_search_config
+                    openai_request, request, http_request, request_id,
+                    web_search_config, web_fetch_config
                 )
             except HTTPException as e:
                 return _handle_streaming_error(e)
 
         return await _create_non_streaming_response(
-            openai_request, request, web_search_config, request_id
+            openai_request, request, web_search_config, request_id, web_fetch_config
         )
     except HTTPException:
         raise
@@ -393,6 +436,66 @@ def _build_non_streaming_web_search_response(
         "input_tokens": openai_response.get("usage", {}).get("prompt_tokens", 0),
         "output_tokens": openai_response.get("usage", {}).get("completion_tokens", 0),
         "server_tool_use": {"web_search_requests": len(search_results)},
+    }
+
+    return {
+        "id": openai_response.get("id", f"msg_{uuid.uuid4()}"),
+        "type": "message",
+        "role": "assistant",
+        "model": original_request.model,
+        "content": content_blocks,
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": usage_data,
+    }
+
+
+def _build_non_streaming_web_fetch_response(
+    openai_response: dict,
+    original_request: ClaudeMessagesRequest,
+    fetch_results: list[tuple[str, dict]],
+) -> dict:
+    """Build a Claude response with web_fetch server_tool_use + result for non-streaming.
+
+    Per the Anthropic spec, the content block order is:
+    1. server_tool_use / web_fetch_tool_result pairs (one per fetch)
+    2. text block (the synthesized answer)
+    """
+    message = openai_response.get("choices", [{}])[0].get("message", {})
+    content_blocks: list[dict] = []
+
+    for url, fetch_result in fetch_results:
+        server_tool_id = _generate_server_tool_id()
+
+        content_blocks.append(
+            {
+                "type": "server_tool_use",
+                "id": server_tool_id,
+                "name": "web_fetch",
+                "input": {"url": url},
+            }
+        )
+
+        if "error" in fetch_result:
+            result_content = fetch_result["error"]
+        else:
+            result_content = fetch_result.get("result", {})
+
+        content_blocks.append(
+            {
+                "type": "web_fetch_tool_result",
+                "tool_use_id": server_tool_id,
+                "content": result_content,
+            }
+        )
+
+    text_content = message.get("content")
+    if text_content:
+        content_blocks.append({"type": "text", "text": text_content})
+
+    usage_data = {
+        "input_tokens": openai_response.get("usage", {}).get("prompt_tokens", 0),
+        "output_tokens": openai_response.get("usage", {}).get("completion_tokens", 0),
     }
 
     return {

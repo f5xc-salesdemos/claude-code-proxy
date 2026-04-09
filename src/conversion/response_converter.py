@@ -139,6 +139,8 @@ async def convert_openai_streaming_to_claude(
     *,
     web_search_config: Optional[Dict[str, Any]] = None,
     search_provider: Optional[SearchProvider] = None,
+    web_fetch_config: Optional[Dict[str, Any]] = None,
+    fetch_provider: Optional[Any] = None,
 ) -> AsyncGenerator[str, None]:
     """Convert OpenAI streaming response to Claude streaming format.
 
@@ -398,6 +400,63 @@ async def convert_openai_streaming_to_claude(
             )
             final_stop_reason = Constants.STOP_END_TURN
 
+        # For web_fetch calls, execute fetch and emit result block
+        elif tool_data.get("is_web_fetch") and fetch_provider is not None:
+            url = ""
+            try:
+                raw_buffer = "".join(tool_data.get("args_buffer", []))
+                args = json.loads(raw_buffer or "{}")
+                url = args.get("url", "")
+            except json.JSONDecodeError:
+                url = "".join(tool_data.get("args_buffer", [])).strip('"')
+
+            logger.info("Executing web fetch for: %s", url)
+            _allowed = (
+                web_fetch_config.get("allowed_domains") if web_fetch_config else None
+            )
+            _blocked = (
+                web_fetch_config.get("blocked_domains") if web_fetch_config else None
+            )
+            fetch_result = await fetch_provider.fetch(
+                url,
+                allowed_domains=_allowed or None,
+                blocked_domains=_blocked or None,
+            )
+
+            if "error" in fetch_result:
+                result_content = fetch_result["error"]
+            else:
+                result_content = fetch_result.get("result", {})
+
+            tool_block_counter += 1
+            result_index = (
+                (text_block_index + tool_block_counter)
+                if text_block_started
+                else (tool_block_counter - 1)
+            )
+            server_tool_id = tool_data.get("server_tool_id", _generate_server_tool_id())
+
+            yield _sse_event(
+                Constants.EVENT_CONTENT_BLOCK_START,
+                {
+                    "type": Constants.EVENT_CONTENT_BLOCK_START,
+                    "index": result_index,
+                    "content_block": {
+                        "type": Constants.CONTENT_WEB_FETCH_RESULT,
+                        "tool_use_id": server_tool_id,
+                        "content": result_content,
+                    },
+                },
+            )
+            yield _sse_event(
+                Constants.EVENT_CONTENT_BLOCK_STOP,
+                {
+                    "type": Constants.EVENT_CONTENT_BLOCK_STOP,
+                    "index": result_index,
+                },
+            )
+            final_stop_reason = Constants.STOP_END_TURN
+
     # Add server_tool_use usage tracking
     if web_search_count > 0:
         usage_data["server_tool_use"] = {"web_search_requests": web_search_count}
@@ -441,6 +500,7 @@ def _handle_tool_delta(
             "claude_index": None,
             "started": False,
             "is_web_search": False,
+            "is_web_fetch": False,
         }
 
     tool_call = current_tool_calls[tc_index]
@@ -453,6 +513,8 @@ def _handle_tool_delta(
         tool_call["name"] = function_data["name"]
         if function_data["name"] == "web_search" and web_search_config:
             tool_call["is_web_search"] = True
+        elif function_data["name"] == "web_fetch":
+            tool_call["is_web_fetch"] = True
 
     # Start content block when we have complete initial data
     if tool_call["id"] and tool_call["name"] and not tool_call["started"]:
@@ -465,9 +527,10 @@ def _handle_tool_delta(
         tool_call["claude_index"] = claude_index
         tool_call["started"] = True
 
-        if tool_call["is_web_search"]:
+        if tool_call["is_web_search"] or tool_call["is_web_fetch"]:
             server_tool_id = _generate_server_tool_id()
             tool_call["server_tool_id"] = server_tool_id
+            tool_name = "web_search" if tool_call["is_web_search"] else "web_fetch"
             events.append(
                 _sse_event(
                     Constants.EVENT_CONTENT_BLOCK_START,
@@ -477,7 +540,7 @@ def _handle_tool_delta(
                         "content_block": {
                             "type": Constants.CONTENT_SERVER_TOOL_USE,
                             "id": server_tool_id,
-                            "name": "web_search",
+                            "name": tool_name,
                             "input": {},
                         },
                     },

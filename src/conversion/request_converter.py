@@ -51,12 +51,42 @@ _WEB_SEARCH_OPENAI_TOOL = {
     },
 }
 
+# Web fetch tool definition injected into OpenAI requests
+_WEB_FETCH_OPENAI_TOOL = {
+    "type": Constants.TOOL_FUNCTION,
+    Constants.TOOL_FUNCTION: {
+        "name": "web_fetch",
+        "description": (
+            "Fetch the full content of a web page or document from a URL."
+            " Returns the page content as markdown text."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to fetch",
+                }
+            },
+            "required": ["url"],
+        },
+    },
+}
+
 
 def _is_web_search_tool(tool: Any) -> bool:
     """Check if a tool dict is an Anthropic server-side web_search tool."""
     if isinstance(tool, dict):
         tool_type = tool.get("type", "")
         return isinstance(tool_type, str) and tool_type.startswith("web_search")
+    return False
+
+
+def _is_web_fetch_tool(tool: Any) -> bool:
+    """Check if a tool dict is an Anthropic server-side web_fetch tool."""
+    if isinstance(tool, dict):
+        tool_type = tool.get("type", "")
+        return isinstance(tool_type, str) and tool_type.startswith("web_fetch")
     return False
 
 
@@ -151,21 +181,25 @@ def _convert_messages_list(
 
 def _convert_tools(
     tools: Optional[List[Any]],
-) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Convert Claude tools to OpenAI function tools.
 
-    Returns (openai_tools, web_search_config).
+    Returns (openai_tools, web_search_config, web_fetch_config).
     """
     if not tools:
-        return [], None
+        return [], None, None
 
     openai_tools: List[Dict[str, Any]] = []
     web_search_config: Optional[Dict[str, Any]] = None
+    web_fetch_config: Optional[Dict[str, Any]] = None
 
     for tool in tools:
         if _is_web_search_tool(tool):
             web_search_config = tool if isinstance(tool, dict) else None
             openai_tools.append(_WEB_SEARCH_OPENAI_TOOL)
+        elif _is_web_fetch_tool(tool):
+            web_fetch_config = tool if isinstance(tool, dict) else None
+            openai_tools.append(_WEB_FETCH_OPENAI_TOOL)
         elif isinstance(tool, ClaudeTool):
             if tool.name and tool.name.strip():
                 openai_tools.append(
@@ -181,7 +215,7 @@ def _convert_tools(
         elif isinstance(tool, dict) and tool.get("name"):
             logger.debug("Skipping unknown tool type: %s", tool.get("type", "none"))
 
-    return openai_tools, web_search_config
+    return openai_tools, web_search_config, web_fetch_config
 
 
 def _convert_tool_choice(
@@ -248,7 +282,7 @@ def convert_claude_to_openai(
         openai_request["top_p"] = claude_request.top_p
 
     # Tools
-    openai_tools, web_search_config = _convert_tools(claude_request.tools)
+    openai_tools, web_search_config, web_fetch_config = _convert_tools(claude_request.tools)
     if openai_tools:
         openai_request["tools"] = openai_tools
 
@@ -257,7 +291,7 @@ def convert_claude_to_openai(
     if mapped_choice is not None:
         openai_request["tool_choice"] = mapped_choice
 
-    return openai_request, web_search_config
+    return openai_request, web_search_config, web_fetch_config
 
 
 # ---------------------------------------------------------------------------

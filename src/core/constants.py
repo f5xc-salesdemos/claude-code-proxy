@@ -15,6 +15,7 @@ class Constants:
     CONTENT_TOOL_RESULT = "tool_result"
     CONTENT_SERVER_TOOL_USE = "server_tool_use"
     CONTENT_WEB_SEARCH_RESULT = "web_search_tool_result"
+    CONTENT_WEB_FETCH_RESULT = "web_fetch_tool_result"
 
     TOOL_FUNCTION = "function"
 

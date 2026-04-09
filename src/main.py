@@ -60,11 +60,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         search_provider = get_provider(config.search_provider)
     app.state.search_provider = search_provider
 
-    # Wire the search provider into the endpoints module global
-    # (endpoints.py uses a module-level global for backward compat)
+    # Initialise the fetch provider (uses Firecrawl scrape API)
+    from src.services.fetch.firecrawl_fetch import FirecrawlFetchProvider  # noqa: PLC0415
+
+    fetch_prov = None
+    firecrawl_url = getattr(config, "firecrawl_api_url", None)
+    if firecrawl_url:
+        fetch_prov = FirecrawlFetchProvider(firecrawl_url)
+    app.state.fetch_provider = fetch_prov
+
+    # Wire providers into the endpoints module globals
     from src.api import endpoints as _ep  # noqa: PLC0415
 
     _ep.search_provider = search_provider
+    _ep.fetch_provider = fetch_prov
 
     app.state.httpx_client = httpx.AsyncClient(timeout=config.request_timeout)
     app.state.custom_headers = custom_headers
@@ -106,6 +115,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await app.state.httpx_client.aclose()
     if app.state.search_provider is not None:
         await app.state.search_provider.close()
+    if app.state.fetch_provider is not None:
+        await app.state.fetch_provider.close()
 
 
 app = FastAPI(
